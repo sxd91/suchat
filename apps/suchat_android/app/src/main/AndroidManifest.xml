@@ -1,6 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
   <uses-permission android:name="android.permission.INTERNET"/>
-  <application android:theme="@style/Theme.Suchat" android:label="Suchat">
+  <application android:theme="@style/Theme.Suchat" android:label="Suchat" android:enableOnBackInvokedCallback="true">
     <activity android:name=".MainActivity" android:exported="true">
       <intent-filter>
         <action android:name="android.intent.action.MAIN"/>
