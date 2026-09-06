@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -36,15 +35,15 @@ import io.github.sxd91.suchat.feature.media.model.SelectionChange
 import io.github.sxd91.suchat.feature.media.model.SelectionState
 
 @Composable
-fun PreviewMediaPicker(request: MediaPickerRequest, assets: List<MediaAsset> = PreviewMediaFixtures.mediaAssets, onComplete: (List<MediaAsset>) -> Unit) {
-    val selection = remember(request.maxSelection) { SelectionState<MediaAsset>(request.maxSelection) }
+fun PreviewMediaPicker(request: MediaPickerRequest, assets: List<MediaAsset> = PreviewMediaFixtures.media, onComplete: (List<MediaAsset>) -> Unit) {
+    val selection = remember(request.selectionLimit) { SelectionState<MediaAsset>(request.selectionLimit) }
     var notice by remember { mutableStateOf("") }
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).padding(16.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text("选择图片", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-            Text("已选 " + selection.count + " / " + request.maxSelection, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("已选 " + selection.count + " / " + request.selectionLimit, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Text(request.title, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 12.dp))
+        Text(request.purpose.name, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 12.dp))
         LazyVerticalGrid(columns = GridCells.Fixed(3), verticalArrangement = Arrangement.spacedBy(8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f)) {
             items(assets, key = { it.id }) { asset ->
                 val chosen = selection.isSelected(asset)
@@ -69,7 +68,7 @@ fun PreviewMediaPicker(request: MediaPickerRequest, assets: List<MediaAsset> = P
         if (notice.isNotEmpty()) Text(notice, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(vertical = 8.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text("□ 原图", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Button(enabled = selection.count >= request.minSelection, onClick = { onComplete(selection.items.toList()) }) { Text("完成 (" + selection.count + ")") }
+            Button(enabled = selection.count > 0, onClick = { onComplete(selection.items.toList()) }) { Text("完成 (" + selection.count + ")") }
         }
     }
 }
