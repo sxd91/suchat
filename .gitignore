@@ -1,0 +1,12 @@
+.dart_tool/
+.packages
+.pub/
+build/
+.gradle/
+.idea/
+*.iml
+apps/suchat_android/local.properties
+apps/suchat_windows/.flutter-plugins
+apps/suchat_windows/.flutter-plugins-dependencies
+apps/suchat_windows/.metadata
+apps/suchat_windows/build/

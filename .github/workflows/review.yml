@@ -1,0 +1,22 @@
+name: Code review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  quality-gate:
+    name: Review quality gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Reject whitespace errors
+        run: git diff --check origin/${{ github.base_ref }}...HEAD
+      - name: Validate workflow syntax
+        uses: raven-actions/actionlint@v2

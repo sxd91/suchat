@@ -1,0 +1,65 @@
+name: Android CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["android-v*"]
+    paths: ["apps/suchat_android/**", ".github/workflows/android-ci.yml"]
+  pull_request:
+    paths: ["apps/suchat_android/**", ".github/workflows/android-ci.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Assemble Android debug APK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/suchat_android
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+      - name: Make Gradle wrapper executable
+        run: chmod +x gradlew
+      - name: Check source formatting boundary
+        run: git diff --check
+      - name: Assemble debug APK
+        run: ./gradlew --no-daemon assembleDebug
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: suchat-android-debug-apk
+          path: apps/suchat_android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+  release:
+    name: Publish Android release
+    if: startsWith(github.ref, 'refs/tags/android-v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: apps/suchat_android
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+      - run: chmod +x gradlew
+      - name: Assemble release APK
+        run: ./gradlew --no-daemon assembleRelease
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: apps/suchat_android/app/build/outputs/apk/release/*.apk
+          generate_release_notes: true
