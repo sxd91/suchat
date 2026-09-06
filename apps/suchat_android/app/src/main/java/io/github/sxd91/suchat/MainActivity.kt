@@ -2,6 +2,7 @@ package io.github.sxd91.suchat
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.core.animateFloatAsState
@@ -77,6 +78,9 @@ private fun SuchatRootShell(status: String, onExit: () -> Unit) {
     var drawer by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
     val progress by animateFloatAsState(if (drawer) 1f else 0f, label = "drawer")
+    BackHandler(enabled = drawer || menu) {
+        if (menu) menu = false else drawer = false
+    }
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
         WeKitPanel(Modifier.fillMaxSize().fillMaxWidth(.666f).alpha(progress))
         Box(Modifier.fillMaxSize().graphicsLayer { scaleX = 1f - .05f * progress; scaleY = 1f - .05f * progress; translationX = 7.dp.toPx() * progress; translationY = 8.dp.toPx() * progress }.clip(RoundedCornerShape(28.dp * progress)).background(MaterialTheme.colorScheme.surface)) {
