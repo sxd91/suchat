@@ -1,5 +1,7 @@
 plugins {
-    id("com.android.application") version "8.7.3" apply false
-    id("org.jetbrains.kotlin.android") version "2.1.0" apply false
-    id("org.jetbrains.kotlin.plugin.compose") version "2.1.0" apply false
+    // AGP 9.0 起内置 Kotlin 支持：org.jetbrains.kotlin.android 不再应用
+    // （应用会直接报 "no longer required for Kotlin support since AGP 9.0"）。
+    alias(libs.plugins.android.application) apply false
+    alias(libs.plugins.kotlin.compose) apply false
+    alias(libs.plugins.kotlin.serialization) apply false
 }
