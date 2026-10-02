@@ -89,8 +89,14 @@ import top.yukonga.miuix.kmp.blur.highlight.LightPosition
 import top.yukonga.miuix.kmp.blur.highlight.LightSource
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
+import top.yukonga.miuix.kmp.blur.sensor.DeviceTilt
+import top.yukonga.miuix.kmp.blur.sensor.rememberDeviceTilt
+import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.cos
 import kotlin.math.sign
+import kotlin.math.sin
+import kotlin.math.sqrt
 
 private val LocalTabBarContentColor = staticCompositionLocalOf { Color.Unspecified }
 private val LocalTabBarScale = staticCompositionLocalOf { { 1f } }
@@ -137,6 +143,78 @@ private val iosIndicatorSpecular = Highlight(
         dualPeak = true,
     ),
 )
+
+// —— 重力感应高光（对齐 WeKit 的 dynamicGravityHighlight）——
+//
+// 与 miuix-blur 的 HighlightStyle 内部 LIGHT_REF 保持一致（勿随意改）。
+private const val LIGHT_REF_X = 0.5f
+private const val LIGHT_REF_Y = 0.7f
+
+/** 重力方向可用的最小模长平方（|g_xy| > 0.1，约 6° 倾斜）—— 平放时回落到"朝上"。 */
+private const val GRAVITY_DIR_THRESHOLD_SQ = 0.01f
+
+/**
+ * 让 `dualPeak` 高光的主光**跟着重力方向转**，并可叠加一个额外角度。
+ *
+ * ## 为什么需要它（★ 2026-10-02 补：此前漏做，是液态玻璃「不对」的主因之一）
+ *
+ * 静态高光在手机上看起来是"死的"—— 玻璃该有的观感是：**转动手机时，
+ * 边缘那道高光会滑到另一边**，像真实玻璃反射环境光。
+ * WeKit 的 `dynamicGravityHighlight` 默认开启，靠 `rememberDeviceTilt()`
+ * 读重力/倾斜传感器，把主光位置按重力在屏幕平面的投影方向旋转。
+ *
+ * ## 算法
+ *
+ * ```
+ * g = (gravityX, gravityY)          // 重力在屏幕平面的投影
+ * |g|² > 0.01 ? 归一化 : (0, -1)    // 几乎水平放置时用"朝上"兜底
+ * 再按 extraDegrees 旋转这个方向      // 两个高光各转不同角度，避免叠在一起
+ * lightPos = (0.5 + lx, 0.7 + ly)   // 以 LIGHT_REF 为基准偏移
+ * ```
+ *
+ * 两个调用点分别传 `-45°`（底栏整体）与 `90°`（选中指示器），
+ * 使两道高光在静止时错开、转动时各自扫过不同的边。
+ *
+ * ## 为什么需要 `speak` 阈值
+ *
+ * 手机平放在桌上时 `|g_xy|` 接近 0，方向会因噪声乱抖 —— 高光会"抽搐"。
+ * 设 0.1 的模长阈值，低于它就直接用朝上方向，视觉上完全察觉不到切换。
+ */
+@Composable
+private fun rememberGravityRotatedHighlight(
+    base: Highlight,
+    tilt: DeviceTilt,
+    extraDegrees: Float = 0f,
+): Highlight {
+    val baseStyle = base.style as BloomStroke
+    val rotatedPrimary = remember(tilt, baseStyle.primaryLight, extraDegrees) {
+        val basePrimary = baseStyle.primaryLight
+        val gx = tilt.gravityX
+        val gy = tilt.gravityY
+        val gMagSq = gx * gx + gy * gy
+        val (lx0, ly0) = if (gMagSq > GRAVITY_DIR_THRESHOLD_SQ) {
+            val invMag = 1f / sqrt(gMagSq)
+            (gx * invMag) to (gy * invMag)
+        } else {
+            0f to -1f
+        }
+        val rad = extraDegrees * PI / 180.0
+        val c = cos(rad).toFloat()
+        val s = sin(rad).toFloat()
+        val lx = c * lx0 - s * ly0
+        val ly = s * lx0 + c * ly0
+        basePrimary.copy(
+            position = LightPosition(
+                x = LIGHT_REF_X + lx,
+                y = LIGHT_REF_Y + ly,
+                z = basePrimary.position.z,
+            ),
+        )
+    }
+    return remember(base, rotatedPrimary) {
+        base.copy(style = baseStyle.copy(primaryLight = rotatedPrimary))
+    }
+}
 
 /**
  * 液态玻璃悬浮 Tab 栏。
@@ -350,6 +428,18 @@ fun LiquidGlassTabBar(
             }
         } else null
 
+    // ★ 重力感应高光（对齐 WeKit 的 dynamicGravityHighlight，默认开）。
+    //
+    // WeKit 在此处读 `rememberDeviceTilt()`，把两块高光的主光按重力方向旋转：
+    //  - baseHighlight（底栏整体）：额外 -45°
+    //  - pillHighlight（选中指示器）：额外 +90°
+    // 两个角度差 135° —— 静止时两道高光错开在胶囊的两条不同边上。
+    //
+    // 非液态玻璃档不读传感器（省电，且 Blur/None 档没有高光绘制）。
+    val tilt = if (isLiquidGlassMode) rememberDeviceTilt().value else DeviceTilt.Zero
+    val baseHighlight = rememberGravityRotatedHighlight(iosIndicatorSpecular, tilt, extraDegrees = -45f)
+    val pillHighlight = rememberGravityRotatedHighlight(iosIndicatorSpecular, tilt, extraDegrees = 90f)
+
     val combinedBackdrop = rememberCombinedBackdrop(backdrop, tabsBackdrop)
 
     Box(
@@ -389,7 +479,7 @@ fun LiquidGlassTabBar(
                                         )
                                     }
                                 },
-                                highlight = { iosIndicatorSpecular.copy(alpha = 0.75f) },
+                                highlight = { baseHighlight.copy(alpha = 0.75f) },
                                 layerBlock = {
                                     val width = size.width.coerceAtLeast(1f)
                                     val s = lerp(1f, 1f + 16.dp.toPx() / width, dampedDragAnimation.pressProgress)
@@ -484,7 +574,7 @@ fun LiquidGlassTabBar(
                                     )
                                 }
                             },
-                            highlight = { iosIndicatorSpecular.copy(alpha = dampedDragAnimation.pressProgress) },
+                            highlight = { pillHighlight.copy(alpha = dampedDragAnimation.pressProgress) },
                             layerBlock = {
                                 scaleX = dampedDragAnimation.scaleX
                                 scaleY = dampedDragAnimation.scaleY
