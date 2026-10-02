@@ -43,7 +43,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
-import io.github.sxd91.suchat.core.design.glass.LiquidGlassTabBarKyant
+import io.github.sxd91.suchat.core.design.glass.LiquidGlassTabBar
 import io.github.sxd91.suchat.core.design.glass.TabBarMode
 import io.github.sxd91.suchat.core.design.glass.TabItem
 import io.github.sxd91.suchat.core.design.theme.SuchatRootTheme
@@ -102,8 +102,8 @@ import io.github.sxd91.suchat.ui.page.settings.rememberSuchatSettings
 import io.github.sxd91.suchat.ui.setup.ServerSetupScreen
 import io.github.sxd91.suchat.ui.theme.SuchatAppearance
 import kotlinx.coroutines.launch
-import com.kyant.backdrop.backdrops.layerBackdrop
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import top.yukonga.miuix.kmp.blur.layerBackdrop
+import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
@@ -657,7 +657,7 @@ private fun MainTabs(
         }
 
         CompositionLocalProvider(LocalDensity provides scaledDensity) {
-            LiquidGlassTabBarKyant(
+            LiquidGlassTabBar(
                 items = tabs,
                 selectedIndex = pagerState.targetPage,
                 onSelect = { index -> scope.launch { pagerState.animateScrollToPage(index) } },

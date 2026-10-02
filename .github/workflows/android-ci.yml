@@ -12,6 +12,47 @@ permissions:
   contents: read
 
 jobs:
+  # ★ 2026-10-02 新增（用户要求）：独立的 lint 检测任务，与 build **并行**跑。
+  #
+  # ## 为什么单独一个 job 而不是塞进 build
+  #
+  #  · **并行省时间**：lint 与 assembleDebug 互不依赖，串行会把总时长相加；
+  #    并行时总时长 = max(lint, build)。
+  #  · **职责分离**：build 关心「能不能出包」，lint 关心「代码质量」；
+  #    两者失败原因不同，分开更容易定位。
+  #  · **独立反馈**：lint 先失败时，GitHub 上能立刻看到是质量问题而非构建问题。
+  #
+  # ## 为什么用 `lintDebug` 而不是 `lint`
+  #
+  # 不带变体的 `lint` 会跑所有变体（debug + release），耗时翻倍；
+  # 这里只需要拦住质量问题，debug 变体足够。
+  lint:
+    name: Lint (Android)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/suchat_android
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+      - name: Make Gradle wrapper executable
+        run: chmod +x gradlew
+      - name: Run Android Lint
+        # --continue：即使有 error 也跑完所有模块，一次性暴露全部问题。
+        run: ./gradlew --no-daemon :app:lintDebug --continue
+      - name: Upload lint report
+        # 报告在失败时**尤其**要看，所以用 always()。
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: suchat-android-lint-report
+          path: apps/suchat_android/app/build/reports/lint-results-*.html
+          if-no-files-found: warn
+
   build:
     name: Assemble Android debug APK
     runs-on: ubuntu-latest
