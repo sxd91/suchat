@@ -5,27 +5,21 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import io.github.sxd91.suchat.core.design.icon.SuchatIcons
 import io.github.sxd91.suchat.core.nav.SuchatNavigator
 import io.github.sxd91.suchat.core.nav.SuchatPage
+import io.github.sxd91.suchat.ui.component.LocalTopBarInset
 import io.github.sxd91.suchat.ui.component.SuchatEntryRow
-import top.yukonga.miuix.kmp.basic.Text as MiuixText
+import io.github.sxd91.suchat.ui.component.SuchatScaffold
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
@@ -35,10 +29,10 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  *
  * 「发现 contains 朋友圈 and 漂流瓶」—— 这两项排在首位。
  *
- * ## 本轮修正（用户第 3、6 条）
+ * ## 本轮修正（用户新需求 1）
  *
- * 图标从 emoji（◉ / ▶ / 📡…）换成 **miuix 矢量图标**（见 [SuchatIcons]），
- * 并**去掉彩色色块背板**（图标直接着主题色，透明底）。
+ * 顶栏切换为「老挂同款」渐变模糊顶栏（[SuchatScaffold]）：
+ * 内容滚动时穿过顶栏下方，模糊层采样到真实内容才有效果。
  */
 @Composable
 fun DiscoverScreen(
@@ -46,7 +40,6 @@ fun DiscoverScreen(
     bottomInset: Dp = 0.dp,
 ) {
     val c = MiuixTheme.colorScheme
-    val statusBarPadding = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
 
     // 分组：每组是 (标题, 图标, 路由) 的列表。
     val groups: List<List<Triple<String, ImageVector, SuchatPage?>>> = listOf(
@@ -78,31 +71,17 @@ fun DiscoverScreen(
         ),
     )
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(c.surface),
-    ) {
-        // 顶栏（发现页无左右操作）。
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = statusBarPadding)
-                .height(48.dp)
-                .background(c.surfaceContainer),
-            contentAlignment = Alignment.Center,
-        ) {
-            MiuixText(
-                text = "发现",
-                fontSize = 17.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = c.onSurface,
-            )
-        }
-
+    SuchatScaffold(
+        title = "发现",
+        onBack = null,
+        bottomInset = bottomInset,
+    ) { pad ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = bottomInset),
+            contentPadding = PaddingValues(
+                top = LocalTopBarInset.current,
+                bottom = pad.calculateBottomPadding(),
+            ),
         ) {
             groups.forEachIndexed { groupIndex, group ->
                 item(key = "group_$groupIndex") {

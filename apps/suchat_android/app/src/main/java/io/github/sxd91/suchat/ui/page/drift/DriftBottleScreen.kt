@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.sxd91.suchat.core.design.icon.SuchatIcons
 import io.github.sxd91.suchat.core.nav.SuchatNavigator
+import io.github.sxd91.suchat.ui.component.LocalTopBarInset
 import io.github.sxd91.suchat.ui.page.secondary.SuchatSecondaryScaffold
 import top.yukonga.miuix.kmp.basic.Icon as MiuixIcon
 import top.yukonga.miuix.kmp.basic.Text as MiuixText
@@ -71,7 +72,10 @@ fun DriftBottleScreen(
     ) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = bottomInset),
+            contentPadding = PaddingValues(
+                top = LocalTopBarInset.current,
+                bottom = bottomInset,
+            ),
         ) {
             // --- 海域卡 ---
             item(key = "sea") {

@@ -34,9 +34,11 @@ import io.github.sxd91.suchat.core.design.icon.SuchatIcons
 import io.github.sxd91.suchat.core.nav.SuchatNavigator
 import io.github.sxd91.suchat.core.nav.SuchatPage
 import io.github.sxd91.suchat.data.SampleData
+import io.github.sxd91.suchat.ui.component.LocalTopBarInset
 import io.github.sxd91.suchat.ui.component.SuchatAvatar
 import io.github.sxd91.suchat.ui.component.SuchatChatRow
 import io.github.sxd91.suchat.ui.component.SuchatEntryRow
+import io.github.sxd91.suchat.ui.component.SuchatScaffold
 import top.yukonga.miuix.kmp.basic.Icon as MiuixIcon
 import top.yukonga.miuix.kmp.basic.IconButton as MiuixIconButton
 import top.yukonga.miuix.kmp.basic.Text as MiuixText
@@ -46,7 +48,23 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  * 二级页面集合 —— 全部使用 miuix 组件与语义色（无色块底、无 emoji）。
  */
 
-/** 通用二级页脚手架：顶栏（返回 + 标题）+ 内容。 */
+/**
+ * 通用二级页脚手架 —— **已切换为「老挂同款」渐变模糊顶栏**（用户新需求 1）。
+ *
+ * 实现委托给 [SuchatScaffold]（移植自 `cn.apixiaoyuan.app` 的 `AppScaffold`）：
+ *  - 顶栏 = miuix `SmallTopAppBar` + `progressiveTextureBlur` 渐变模糊；
+ *  - 内容从顶栏下方**穿过**（滚动时），模糊层采到真实内容才有磨砂质感；
+ *  - 顶栏高度经 [LocalTopBarInset] 下发给页面里的滚动容器消费。
+ *
+ * ## 页面写法约定（重要）
+ *
+ * 页面里的滚动容器（LazyColumn）必须消费顶栏 inset：
+ * ```
+ * contentPadding = PaddingValues(top = LocalTopBarInset.current, bottom = bottomInset)
+ * ```
+ * 内容初始落在顶栏下方、滚动时穿过顶栏 —— 少了这步模糊层采不到内容，
+ * 顶栏会退化成「实色块」。
+ */
 @Composable
 fun SuchatSecondaryScaffold(
     title: String,
@@ -54,40 +72,11 @@ fun SuchatSecondaryScaffold(
     bottomInset: Dp = 0.dp,
     content: @Composable () -> Unit,
 ) {
-    val c = MiuixTheme.colorScheme
-    val statusBarPadding = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(c.surface),
+    SuchatScaffold(
+        title = title,
+        onBack = onBack,
+        bottomInset = bottomInset,
     ) {
-        // 顶栏：返回键 + 标题（miuix 矢量返回图标）。
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = statusBarPadding)
-                .height(48.dp)
-                .background(c.surfaceContainer)
-                .padding(start = 6.dp, end = 16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            MiuixIconButton(onClick = onBack) {
-                MiuixIcon(
-                    imageVector = SuchatIcons.Back,
-                    contentDescription = "返回",
-                    tint = c.onSurface,
-                    modifier = Modifier.size(22.dp),
-                )
-            }
-            MiuixText(
-                text = title,
-                fontSize = 17.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = c.onSurface,
-                modifier = Modifier.padding(start = 4.dp),
-            )
-        }
         content()
     }
 }
@@ -101,7 +90,10 @@ fun NewFriendsScreen(nav: SuchatNavigator, bottomInset: Dp = 0.dp) {
     SuchatSecondaryScaffold(title = "新的朋友", onBack = { nav.pop() }, bottomInset = bottomInset) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = bottomInset),
+            contentPadding = PaddingValues(
+                top = LocalTopBarInset.current,
+                bottom = bottomInset,
+            ),
         ) {
             items(SampleData.friendRequests, key = { it.id }) { req ->
                 SuchatChatRow(
@@ -123,7 +115,10 @@ fun GroupChatsScreen(nav: SuchatNavigator, bottomInset: Dp = 0.dp) {
     SuchatSecondaryScaffold(title = "群聊", onBack = { nav.pop() }, bottomInset = bottomInset) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = bottomInset),
+            contentPadding = PaddingValues(
+                top = LocalTopBarInset.current,
+                bottom = bottomInset,
+            ),
         ) {
             items(SampleData.chats.filter { it.isGroup }, key = { it.id }) { group ->
                 SuchatChatRow(
@@ -145,7 +140,10 @@ fun TagsScreen(nav: SuchatNavigator, bottomInset: Dp = 0.dp) {
     SuchatSecondaryScaffold(title = "标签", onBack = { nav.pop() }, bottomInset = bottomInset) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = bottomInset),
+            contentPadding = PaddingValues(
+                top = LocalTopBarInset.current,
+                bottom = bottomInset,
+            ),
         ) {
             items(listOf("同事" to 8, "家人" to 4, "大学同学" to 15, "健身伙伴" to 3)) { (name, count) ->
                 SuchatEntryRow(
@@ -165,7 +163,10 @@ fun OfficialAccountsScreen(nav: SuchatNavigator, bottomInset: Dp = 0.dp) {
     SuchatSecondaryScaffold(title = "公众号", onBack = { nav.pop() }, bottomInset = bottomInset) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = bottomInset),
+            contentPadding = PaddingValues(
+                top = LocalTopBarInset.current,
+                bottom = bottomInset,
+            ),
         ) {
             items(
                 listOf("人民日报", "新华社", "环球时报", "央视新闻"),
@@ -196,7 +197,10 @@ fun ContactDetailScreen(nav: SuchatNavigator, contactId: String, bottomInset: Dp
     ) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = bottomInset),
+            contentPadding = PaddingValues(
+                top = LocalTopBarInset.current,
+                bottom = bottomInset,
+            ),
         ) {
             item(key = "profile") {
                 Column(Modifier.background(c.surface)) {
@@ -262,7 +266,10 @@ fun MomentsScreen(nav: SuchatNavigator, bottomInset: Dp = 0.dp) {
     SuchatSecondaryScaffold(title = "朋友圈", onBack = { nav.pop() }, bottomInset = bottomInset) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = bottomInset),
+            contentPadding = PaddingValues(
+                top = LocalTopBarInset.current,
+                bottom = bottomInset,
+            ),
         ) {
             items(SampleData.moments, key = { it.id }) { moment ->
                 Column(
@@ -429,7 +436,10 @@ fun ProfileScreen(nav: SuchatNavigator, bottomInset: Dp = 0.dp) {
     SuchatSecondaryScaffold(title = "个人信息", onBack = { nav.pop() }, bottomInset = bottomInset) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = bottomInset),
+            contentPadding = PaddingValues(
+                top = LocalTopBarInset.current,
+                bottom = bottomInset,
+            ),
         ) {
             item(key = "avatar") {
                 Row(
@@ -485,7 +495,10 @@ fun SettingsScreen(nav: SuchatNavigator, bottomInset: Dp = 0.dp) {
     SuchatSecondaryScaffold(title = "设置", onBack = { nav.pop() }, bottomInset = bottomInset) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = bottomInset),
+            contentPadding = PaddingValues(
+                top = LocalTopBarInset.current,
+                bottom = bottomInset,
+            ),
         ) {
             item(key = "g1") {
                 Column(Modifier.background(c.surface)) {

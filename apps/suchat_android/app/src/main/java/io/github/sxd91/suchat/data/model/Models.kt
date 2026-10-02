@@ -44,6 +44,26 @@ data class Message(
     val type: MessageType = MessageType.Text,
     /** 时间戳（毫秒）。 */
     val timestamp: Long,
+    /**
+     * 已读状态（用户新需求 3）。
+     *
+     * 语义（对齐微信）：
+     *  - 自己发出的消息：`true` = 对方已读（单聊显示「已读」小字）；
+     *  - 收到的消息：`true` = 我已读。
+     *
+     * 默认 true（占位数据里历史消息都当已读）；新发出的消息初始 false，
+     * 由 [markRead] 在一段时间后置真，用来演示「已读回执」。
+     */
+    val isRead: Boolean = true,
+    /** 语音时长（秒）；仅 [MessageType.Voice] 有效。 */
+    val voiceSeconds: Int = 0,
+    /**
+     * 是否被撤回（用户新需求 2）。
+     *
+     * 撤回后消息**不删除**，而是变成一条居中的系统提示
+     * （「你撤回了一条消息」/「对方撤回了一条消息」），与微信一致。
+     */
+    val recalled: Boolean = false,
 )
 
 /** 消息类型（决定气泡内的渲染方式）。 */

@@ -45,13 +45,23 @@ import io.github.sxd91.suchat.ui.page.chats.ChatsScreen
 import io.github.sxd91.suchat.ui.page.contacts.ContactsScreen
 import io.github.sxd91.suchat.ui.page.discover.DiscoverScreen
 import io.github.sxd91.suchat.ui.page.drift.DriftBottleScreen
+import io.github.sxd91.suchat.ui.page.functional.AddMenuScreen
+import io.github.sxd91.suchat.ui.page.functional.CardsScreen
+import io.github.sxd91.suchat.ui.page.functional.ChannelsScreen
+import io.github.sxd91.suchat.ui.page.functional.FavoritesScreen
+import io.github.sxd91.suchat.ui.page.functional.MiniProgramsScreen
+import io.github.sxd91.suchat.ui.page.functional.ScanScreen
+import io.github.sxd91.suchat.ui.page.functional.SearchDiscoverScreen
+import io.github.sxd91.suchat.ui.page.functional.SearchScreen
+import io.github.sxd91.suchat.ui.page.functional.ServicesScreen
+import io.github.sxd91.suchat.ui.page.functional.StickersScreen
+import io.github.sxd91.suchat.ui.page.functional.TopStoriesScreen
 import io.github.sxd91.suchat.ui.page.me.MeScreen
 import io.github.sxd91.suchat.ui.page.secondary.ContactDetailScreen
 import io.github.sxd91.suchat.ui.page.secondary.GroupChatsScreen
 import io.github.sxd91.suchat.ui.page.secondary.MomentsScreen
 import io.github.sxd91.suchat.ui.page.secondary.NewFriendsScreen
 import io.github.sxd91.suchat.ui.page.secondary.OfficialAccountsScreen
-import io.github.sxd91.suchat.ui.page.secondary.PlaceholderScreen
 import io.github.sxd91.suchat.ui.page.secondary.ProfileScreen
 import io.github.sxd91.suchat.ui.page.secondary.SettingsScreen
 import io.github.sxd91.suchat.ui.page.secondary.TagsScreen
@@ -147,14 +157,23 @@ private fun SuchatAppShell(statusText: String) {
         drawerOpen = drawerOpen,
         onOpen = { drawerOpen = true },
         onClose = { drawerOpen = false },
-        panel = {
+        panel = { revealWidth ->
             WeKitPanelContent(
                 userName = io.github.sxd91.suchat.data.SampleData.me.name,
                 statusText = statusText,
+                revealWidth = revealWidth,
                 onItemClick = { key ->
                     drawerOpen = false
+                    // 负一屏全部入口接线（每个 key 对应真实页面，不是空壳）。
                     when (key) {
-                        "more" -> nav.push(SuchatPage.Settings)
+                        "profile" -> nav.push(SuchatPage.Profile)
+                        "new_chat" -> nav.push(SuchatPage.AddMenu)
+                        "scan" -> nav.push(SuchatPage.Scan)
+                        "pay" -> nav.push(SuchatPage.Services)
+                        "drift" -> nav.push(SuchatPage.DriftBottle)
+                        "moments" -> nav.push(SuchatPage.Moments)
+                        "favorites" -> nav.push(SuchatPage.Favorites)
+                        "settings" -> nav.push(SuchatPage.Settings)
                     }
                 },
             )
@@ -217,6 +236,11 @@ private fun MainTabs(
         pageCount = { SuchatTab.entries.size },
     )
 
+    // ★ 关键：拖拽底栏期间，必须**暂停**导航状态 → pager 的同步。
+    // 否则 LaunchedEffect(nav.currentTab) 会同时 animateScrollToPage，
+    // 与手指的 scroll {} 抢驱动权 —— 表现为页面抖动 + 玻璃采样错乱（"玻璃消失"）。
+    var draggingTab by remember { mutableStateOf(false) }
+
     // 底栏限位：胶囊 64dp + 12dp + 手势条（只抬高滚动终点，不挡内容折射）。
     val barBottomPadding = 12.dp +
         WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
@@ -230,7 +254,9 @@ private fun MainTabs(
         }
     }
     // 导航状态 → pager（点击底栏时的跳转）。
-    LaunchedEffect(nav.currentTab) {
+    // 拖拽中跳过：此时由手指驱动，不能抢。
+    LaunchedEffect(nav.currentTab, draggingTab) {
+        if (draggingTab) return@LaunchedEffect
         val target = nav.currentTab.ordinal
         if (pagerState.currentPage != target || pagerState.targetPage != target) {
             pagerState.animateScrollToPage(target)
@@ -263,14 +289,39 @@ private fun MainTabs(
             onSelect = { index -> scope.launch { pagerState.animateScrollToPage(index) } },
             backdrop = backdrop,
             mode = TabBarMode.LiquidGlass,
-            // ★ 用户第 5 条「划到哪切到哪」：
-            // 拖拽过程中把小数索引喂给 pager，让页面内容与指示器同步位移。
-            // 用 scrollToPage（无动画）而非 animateScrollToPage —— 后者会与
-            // 手指拖拽打架（每帧启动新动画）。
+            // ★ 「划到哪切到哪」+ 保持平移动画 + 玻璃不消失。
+            //
+            // 药方：用 pager 自己的**手势驱动 API**（scroll { scrollBy }）逐帧跟随，
+            // 而**不是** scrollToPage（离散跳页）——
+            //  - scrollToPage 是"瞬移"，没有平移动画；
+            //  - 每帧 launch 协程还会与 LaunchedEffect(nav.currentTab) 的
+            //    animateScrollToPage 打架，pager 高频抖动 → 底栏 backdrop 录制错乱
+            //    → 玻璃看起来"自己消失变成普通 tab"。
+            //
+            // scroll { scrollBy(delta) } 走的是同一条手势管线，天然带动画、
+            // 无抖动、玻璃采样稳定。
             onDragFraction = { fraction ->
+                if (!draggingTab) draggingTab = true
+                val currentFraction = pagerState.currentPage + pagerState.currentPageOffsetFraction
+                val deltaPages = fraction - currentFraction
+                // 转成像素增量：一页宽 = pager 自身尺寸 / 页数。
+                val pageWidthPx = pagerState.layoutInfo.pageSize
+                if (pageWidthPx > 0) {
+                    scope.launch {
+                        pagerState.scroll {
+                            // 限制单帧位移，避免猛拽时越界过大。
+                            val maxDelta = pageWidthPx.toFloat()
+                            scrollBy((deltaPages * pageWidthPx).coerceIn(-maxDelta, maxDelta))
+                        }
+                    }
+                }
+            },
+            // 松手：吸附到最近整页（这一步才带平移动画的收尾），并恢复同步。
+            onDragEnd = { fraction ->
                 val target = fraction.roundToIntSafely(pagerState.pageCount)
-                if (target != pagerState.currentPage) {
-                    scope.launch { pagerState.scrollToPage(target) }
+                scope.launch {
+                    pagerState.animateScrollToPage(target)
+                    draggingTab = false
                 }
             },
             modifier = Modifier
@@ -294,56 +345,23 @@ private fun SecondaryHost(page: SuchatPage, nav: SuchatNavigator, bottomInset: D
         is SuchatPage.ContactDetail -> ContactDetailScreen(
             nav = nav, contactId = page.contactId, bottomInset = bottomInset,
         )
-        SuchatPage.Search -> PlaceholderScreen(
-            nav = nav, title = "搜索",
-            description = "搜索聊天记录、联系人、朋友圈", bottomInset = bottomInset,
-        )
-        SuchatPage.AddMenu -> PlaceholderScreen(
-            nav = nav, title = "添加",
-            description = "发起群聊 / 添加朋友 / 扫一扫 / 收付款", bottomInset = bottomInset,
-        )
+        SuchatPage.Search -> SearchScreen(nav = nav, bottomInset = bottomInset)
+        SuchatPage.AddMenu -> AddMenuScreen(nav = nav, bottomInset = bottomInset)
         SuchatPage.NewFriends -> NewFriendsScreen(nav = nav, bottomInset = bottomInset)
         SuchatPage.GroupChats -> GroupChatsScreen(nav = nav, bottomInset = bottomInset)
         SuchatPage.Tags -> TagsScreen(nav = nav, bottomInset = bottomInset)
         SuchatPage.OfficialAccounts -> OfficialAccountsScreen(nav = nav, bottomInset = bottomInset)
         SuchatPage.Moments, SuchatPage.MyMoments -> MomentsScreen(nav = nav, bottomInset = bottomInset)
         SuchatPage.DriftBottle -> DriftBottleScreen(nav = nav, bottomInset = bottomInset)
-        SuchatPage.Channels -> PlaceholderScreen(
-            nav = nav, title = "视频号",
-            description = "短视频与直播内容流", bottomInset = bottomInset,
-        )
-        SuchatPage.Scan -> PlaceholderScreen(
-            nav = nav, title = "扫一扫",
-            description = "扫码 / 识物 / 翻译", bottomInset = bottomInset,
-        )
-        SuchatPage.TopStories -> PlaceholderScreen(
-            nav = nav, title = "看一看",
-            description = "朋友在看 / 精选内容", bottomInset = bottomInset,
-        )
-        SuchatPage.SearchDiscover -> PlaceholderScreen(
-            nav = nav, title = "搜一搜",
-            description = "搜索全网内容", bottomInset = bottomInset,
-        )
-        SuchatPage.MiniPrograms -> PlaceholderScreen(
-            nav = nav, title = "小程序",
-            description = "最近使用 / 我的小程序", bottomInset = bottomInset,
-        )
-        SuchatPage.Services -> PlaceholderScreen(
-            nav = nav, title = "服务",
-            description = "收付款 / 钱包 / 生活缴费", bottomInset = bottomInset,
-        )
-        SuchatPage.Favorites -> PlaceholderScreen(
-            nav = nav, title = "收藏",
-            description = "收藏的聊天记录、图片、链接", bottomInset = bottomInset,
-        )
-        SuchatPage.Cards -> PlaceholderScreen(
-            nav = nav, title = "卡包",
-            description = "卡券 / 会员卡 / 交通卡", bottomInset = bottomInset,
-        )
-        SuchatPage.Stickers -> PlaceholderScreen(
-            nav = nav, title = "表情",
-            description = "我的表情 / 表情商店", bottomInset = bottomInset,
-        )
+        SuchatPage.Channels -> ChannelsScreen(nav = nav, bottomInset = bottomInset)
+        SuchatPage.Scan -> ScanScreen(nav = nav, bottomInset = bottomInset)
+        SuchatPage.TopStories -> TopStoriesScreen(nav = nav, bottomInset = bottomInset)
+        SuchatPage.SearchDiscover -> SearchDiscoverScreen(nav = nav, bottomInset = bottomInset)
+        SuchatPage.MiniPrograms -> MiniProgramsScreen(nav = nav, bottomInset = bottomInset)
+        SuchatPage.Services -> ServicesScreen(nav = nav, bottomInset = bottomInset)
+        SuchatPage.Favorites -> FavoritesScreen(nav = nav, bottomInset = bottomInset)
+        SuchatPage.Cards -> CardsScreen(nav = nav, bottomInset = bottomInset)
+        SuchatPage.Stickers -> StickersScreen(nav = nav, bottomInset = bottomInset)
         SuchatPage.Settings -> SettingsScreen(nav = nav, bottomInset = bottomInset)
         SuchatPage.Profile -> ProfileScreen(nav = nav, bottomInset = bottomInset)
     }

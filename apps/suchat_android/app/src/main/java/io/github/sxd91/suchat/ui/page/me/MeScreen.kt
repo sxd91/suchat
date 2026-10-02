@@ -2,19 +2,15 @@ package io.github.sxd91.suchat.ui.page.me
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -28,8 +24,10 @@ import io.github.sxd91.suchat.core.design.icon.SuchatIcons
 import io.github.sxd91.suchat.core.nav.SuchatNavigator
 import io.github.sxd91.suchat.core.nav.SuchatPage
 import io.github.sxd91.suchat.data.SampleData
+import io.github.sxd91.suchat.ui.component.LocalTopBarInset
 import io.github.sxd91.suchat.ui.component.SuchatAvatar
 import io.github.sxd91.suchat.ui.component.SuchatEntryRow
+import io.github.sxd91.suchat.ui.component.SuchatScaffold
 import top.yukonga.miuix.kmp.basic.Icon as MiuixIcon
 import top.yukonga.miuix.kmp.basic.Text as MiuixText
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -37,11 +35,10 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 /**
  * 「我的」tab。
  *
- * ## 本轮修正（用户第 3、6 条）
+ * ## 本轮修正（用户新需求 1）
  *
- * - 图标从 emoji 换成 miuix 矢量图标；
- * - 去掉彩色色块背板（图标透明底 + 主题色）；
- * - 头像用 [SuchatAvatar]（**莫奈取色**，用户第 1 条）。
+ * 顶栏切换为「老挂同款」渐变模糊顶栏（[SuchatScaffold]）。
+ * 个人卡片与此前一致（头像莫奈取色、miuix 矢量图标、透明底）。
  */
 @Composable
 fun MeScreen(
@@ -49,7 +46,6 @@ fun MeScreen(
     bottomInset: Dp = 0.dp,
 ) {
     val c = MiuixTheme.colorScheme
-    val statusBarPadding = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val me = SampleData.me
 
     // (标题, 图标, 路由)
@@ -62,23 +58,17 @@ fun MeScreen(
         Triple("设置", SuchatIcons.Settings, SuchatPage.Settings),
     )
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(c.surface),
-    ) {
-        // 顶栏（「我的」页无标题）。
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = statusBarPadding)
-                .height(48.dp)
-                .background(c.surfaceContainer),
-        )
-
+    SuchatScaffold(
+        title = "我的",
+        onBack = null,
+        bottomInset = bottomInset,
+    ) { pad ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = bottomInset),
+            contentPadding = PaddingValues(
+                top = LocalTopBarInset.current,
+                bottom = pad.calculateBottomPadding(),
+            ),
         ) {
             // 个人卡片。
             item(key = "profile") {

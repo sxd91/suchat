@@ -8,6 +8,7 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -49,9 +50,11 @@ import io.github.sxd91.suchat.core.design.icon.SuchatIcons
 import io.github.sxd91.suchat.core.nav.SuchatNavigator
 import io.github.sxd91.suchat.core.nav.SuchatPage
 import io.github.sxd91.suchat.data.SampleData
+import io.github.sxd91.suchat.ui.component.LocalTopBarInset
 import io.github.sxd91.suchat.ui.component.SuchatAvatar
 import io.github.sxd91.suchat.ui.component.SuchatChatRow
 import io.github.sxd91.suchat.ui.component.SuchatEntryRow
+import io.github.sxd91.suchat.ui.component.SuchatScaffold
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.Icon as MiuixIcon
 import top.yukonga.miuix.kmp.basic.IconButton as MiuixIconButton
@@ -126,26 +129,33 @@ fun ContactsScreen(
         }
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(c.surface),
-    ) {
-        Column(Modifier.fillMaxSize()) {
-            // --- 顶栏 ---
-            Row_(
-                statusBarPadding = statusBarPadding,
-                title = "联系人",
-                onAdd = { nav.push(SuchatPage.NewFriends) },
-            )
-
+    SuchatScaffold(
+        title = "联系人",
+        onBack = null,
+        bottomInset = bottomInset,
+        actions = {
+            // 顶栏右侧「+」：去「新的朋友」（与旧版行为一致）。
+            MiuixIconButton(onClick = { nav.push(SuchatPage.NewFriends) }) {
+                MiuixIcon(
+                    imageVector = SuchatIcons.Add,
+                    contentDescription = "添加",
+                    tint = MiuixTheme.colorScheme.onSurface,
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+        },
+    ) { pad ->
+        Box(modifier = Modifier.fillMaxSize()) {
             // --- 列表 ---
+            // 顶栏高度（LocalTopBarInset）进 contentPadding.top：
+            // 内容初始落在顶栏下方、滚动时**穿过**顶栏下方 —— 模糊层才采得到内容。
             LazyColumn(
                 state = listState,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(c.surface),
-                contentPadding = PaddingValues(bottom = bottomInset),
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(
+                    top = LocalTopBarInset.current,
+                    bottom = pad.calculateBottomPadding(),
+                ),
             ) {
                 // 固定入口
                 item(key = "fixed_entries") {
@@ -225,35 +235,41 @@ fun ContactsScreen(
                     )
                 }
             }
-        }
 
         // --- 右侧字母索引：长条胶囊 + 滑动 + 气泡 ---
+        //
+        // ★ 修正（用户反馈"滑动时胶囊向左瞬移"）：
+        // 旧结构是 `Box { 气泡; 索引条 }`，Box 宽度 wrap-content —— 气泡（44dp +
+        // 44dp 间距 = 88dp）比索引条（28dp）宽得多，气泡一出现就把 Box 撑宽，
+        // 而 Box 用 `align(CenterEnd)` 贴右，于是**索引条被挤向左边**，看起来"瞬移"。
+        //
+        // 修法：外层 Box 给**固定宽度**（气泡位 + 间距 + 条宽），气泡用绝对定位
+        // 画在左侧、不参与布局，索引条固定贴右 —— 气泡出现不再影响任何布局。
         Box(
             modifier = Modifier
                 .align(Alignment.CenterEnd)
+                .fillMaxHeight(0.62f)
+                .width(IndexBubbleWidth + IndexGap + IndexBarWidth)
                 .padding(end = 6.dp),
         ) {
-            // 气泡（在胶囊左侧）。仅在按住时可见，位置跟随手指。
-            AnimatedVisibility(
-                visible = activeLetter != null,
-                enter = fadeIn() + scaleIn(),
-                exit = fadeOut() + scaleOut(),
-                modifier = Modifier
-                    .align(Alignment.CenterEnd)
-                    .padding(end = 44.dp),
-            ) {
+            // 气泡：绝对定位在左侧，垂直位置跟随手指（不参与布局）。
+            if (activeLetter != null) {
                 LetterBubble(
                     letter = activeLetter ?: "",
-                    offsetY = with(density) { (bubbleY - barHeightPx / 2f).toDp() },
+                    offsetY = with(density) {
+                        (bubbleY - barHeightPx / 2f).toDp()
+                    },
+                    modifier = Modifier.align(Alignment.CenterStart),
                 )
             }
 
-            // 长条胶囊。
+            // 长条胶囊：固定贴右。
             Column(
                 modifier = Modifier
-                    .fillMaxHeight(0.62f)
-                    .width(28.dp)
-                    .clip(RoundedCornerShape(14.dp))
+                    .align(Alignment.CenterEnd)
+                    .fillMaxHeight()
+                    .width(IndexBarWidth)
+                    .clip(RoundedCornerShape(IndexBarWidth / 2))
                     .background(c.surfaceContainerHigh.copy(alpha = 0.9f))
                     .onSizeChanged { barHeightPx = it.height.toFloat() }
                     .pointerInput(letters) {
@@ -287,7 +303,7 @@ fun ContactsScreen(
                             onTap = { activeLetter = null },
                         )
                     },
-                verticalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceEvenly,
+                verticalArrangement = Arrangement.SpaceEvenly,
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 letters.forEach { letter ->
@@ -301,24 +317,34 @@ fun ContactsScreen(
             }
         }
     }
+    }
 }
+
+/** 索引条宽。 */
+private val IndexBarWidth = 28.dp
+
+/** 气泡占位宽。 */
+private val IndexBubbleWidth = 44.dp
+
+/** 气泡与索引条之间的间距。 */
+private val IndexGap = 10.dp
 
 /**
  * 索引气泡 —— 手指按住索引条时显示当前字母。
  *
- * 位置用 [offsetY] 跟随手指相对索引条中心点的偏移；
- * 视觉是「圆角方形 + 大号字母 + 主题色底」，与 miuix 的 Tooltip 风格一致。
+ * @param offsetY 相对索引条中心点的垂直偏移（跟随手指）。
  */
 @Composable
 private fun LetterBubble(
     letter: String,
     offsetY: Dp,
+    modifier: Modifier = Modifier,
 ) {
     val c = MiuixTheme.colorScheme
     Box(
-        modifier = Modifier
+        modifier = modifier
             .graphicsLayer { translationY = offsetY.toPx() }
-            .size(44.dp)
+            .size(IndexBubbleWidth)
             .clip(RoundedCornerShape(14.dp))
             .background(c.primary),
         contentAlignment = Alignment.Center,
@@ -329,40 +355,5 @@ private fun LetterBubble(
             fontWeight = FontWeight.SemiBold,
             color = c.onPrimary,
         )
-    }
-}
-
-/** 顶栏：标题 + 右上角「+」。 */
-@Composable
-private fun Row_(
-    statusBarPadding: Dp,
-    title: String,
-    onAdd: () -> Unit,
-) {
-    val c = MiuixTheme.colorScheme
-    androidx.compose.foundation.layout.Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = statusBarPadding)
-            .height(48.dp)
-            .background(c.surfaceContainer)
-            .padding(start = 16.dp, end = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        MiuixText(
-            text = title,
-            fontSize = 17.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = c.onSurface,
-            modifier = Modifier.weight(1f),
-        )
-        MiuixIconButton(onClick = onAdd) {
-            MiuixIcon(
-                imageVector = SuchatIcons.Add,
-                contentDescription = "添加",
-                tint = c.onSurface,
-                modifier = Modifier.size(22.dp),
-            )
-        }
     }
 }

@@ -7,22 +7,33 @@ import top.yukonga.miuix.kmp.icon.extended.Back
 import top.yukonga.miuix.kmp.icon.extended.BankCards
 import top.yukonga.miuix.kmp.icon.extended.ChevronBackward
 import top.yukonga.miuix.kmp.icon.extended.ChevronForward
+import top.yukonga.miuix.kmp.icon.extended.Clear
 import top.yukonga.miuix.kmp.icon.extended.Close
 import top.yukonga.miuix.kmp.icon.extended.Community
 import top.yukonga.miuix.kmp.icon.extended.Contacts
 import top.yukonga.miuix.kmp.icon.extended.ContactsCircle
+import top.yukonga.miuix.kmp.icon.extended.Copy
+import top.yukonga.miuix.kmp.icon.extended.Delete
 import top.yukonga.miuix.kmp.icon.extended.Email
 import top.yukonga.miuix.kmp.icon.extended.Favorites
 import top.yukonga.miuix.kmp.icon.extended.FavoritesFill
+import top.yukonga.miuix.kmp.icon.extended.File
+import top.yukonga.miuix.kmp.icon.extended.Forward
+import top.yukonga.miuix.kmp.icon.extended.GridView
+import top.yukonga.miuix.kmp.icon.extended.Help
 import top.yukonga.miuix.kmp.icon.extended.Image
+import top.yukonga.miuix.kmp.icon.extended.Link
 import top.yukonga.miuix.kmp.icon.extended.Location
 import top.yukonga.miuix.kmp.icon.extended.Lock
 import top.yukonga.miuix.kmp.icon.extended.Messages
 import top.yukonga.miuix.kmp.icon.extended.Mic
 import top.yukonga.miuix.kmp.icon.extended.More
+import top.yukonga.miuix.kmp.icon.extended.Music
 import top.yukonga.miuix.kmp.icon.extended.Notes
 import top.yukonga.miuix.kmp.icon.extended.Phone
 import top.yukonga.miuix.kmp.icon.extended.Play
+import top.yukonga.miuix.kmp.icon.extended.Promotions
+import top.yukonga.miuix.kmp.icon.extended.Recent
 import top.yukonga.miuix.kmp.icon.extended.Recording
 import top.yukonga.miuix.kmp.icon.extended.Scan
 import top.yukonga.miuix.kmp.icon.extended.Search
@@ -34,6 +45,8 @@ import top.yukonga.miuix.kmp.icon.extended.Theme
 import top.yukonga.miuix.kmp.icon.extended.Timer
 import top.yukonga.miuix.kmp.icon.extended.Translate
 import top.yukonga.miuix.kmp.icon.extended.Undo
+import top.yukonga.miuix.kmp.icon.extended.Update
+import top.yukonga.miuix.kmp.icon.extended.WorldClock
 import top.yukonga.miuix.kmp.icon.extended.ZoomOut
 
 /**
@@ -93,6 +106,60 @@ object SuchatIcons {
 
     /** 关闭。 */
     val Close: ImageVector get() = MiuixIcons.Regular.Close
+
+    /** 复制（长按菜单）。 */
+    val Copy: ImageVector get() = MiuixIcons.Regular.Copy
+
+    /** 转发（长按菜单）。 */
+    val Forward: ImageVector get() = MiuixIcons.Regular.Forward
+
+    /** 删除（长按菜单）。 */
+    val Delete: ImageVector get() = MiuixIcons.Regular.Delete
+
+    /** 清空（扫一扫清结果 / 清除缓存）。 */
+    val Clear: ImageVector get() = MiuixIcons.Regular.Clear
+
+    /** 文件（收藏·文件）。 */
+    val File: ImageVector get() = MiuixIcons.Regular.File
+
+    /** 网格（小程序宫格 / 表情宫格）。 */
+    val GridView: ImageVector get() = MiuixIcons.Regular.GridView
+
+    /** 帮助（关于 / 帮助与反馈）。 */
+    val Help: ImageVector get() = MiuixIcons.Regular.Help
+
+    /** 链接（收藏·链接）。 */
+    val Link: ImageVector get() = MiuixIcons.Regular.Link
+
+    /** 音乐（收藏·音乐 / 音乐播放）。 */
+    val Music: ImageVector get() = MiuixIcons.Regular.Music
+
+    /** 优惠券（卡包·券）。 */
+    val Promotions: ImageVector get() = MiuixIcons.Regular.Promotions
+
+    /** 最近使用（小程序·最近）。 */
+    val Recent: ImageVector get() = MiuixIcons.Regular.Recent
+
+    /** 更新（检查更新 / 版本）。 */
+    val Update: ImageVector get() = MiuixIcons.Regular.Update
+
+    /** 世界时钟（看一看·资讯 / 时间类条目）。 */
+    val WorldClock: ImageVector get() = MiuixIcons.Regular.WorldClock
+
+    /** 播放（视频号中央标识 / 电影购票）。 */
+    val Play: ImageVector get() = MiuixIcons.Regular.Play
+
+    /** 点赞·填充（视频号 / 看一看的点赞状态）。 */
+    val FavoritesFill: ImageVector get() = MiuixIcons.Regular.FavoritesFill
+
+    /** 商店（小程序 / 购物图标）。 */
+    val Store: ImageVector get() = MiuixIcons.Regular.Store
+
+    /** 计时器（12306 / 出行 / 摇一摇）。 */
+    val Timer: ImageVector get() = MiuixIcons.Regular.Timer
+
+    /** 主题（手电筒开关等通用图标）。 */
+    val Theme: ImageVector get() = MiuixIcons.Regular.Theme
 
     /** 搜索。 */
     val Search: ImageVector get() = MiuixIcons.Regular.Search

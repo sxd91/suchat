@@ -159,11 +159,19 @@ private val iosIndicatorSpecular = Highlight(
  * `HorizontalPager` 实时跟随拖拽位置，做到指示器与页面内容同步移动 ——
  * 这就是"划到哪切到哪"。
  *
- * 松手后仍通过 [onSelect] 落定最终页（并触发吸附动画）。
+ * ## ★ 2026-10-02 修正：不能用 `value`，要用 `targetValue`
+ *
+ * `value` 是**弹簧动画的当前值**（跟随手指但有弹簧延迟），`targetValue`
+ * 才是**手指直接映射的目标**。传 `value` 会让页面跟在指示器弹簧后面追，
+ * 观感是"拖快了页面跟不上"。
+ *
+ * 同理新增 [onDragEnd]：松手时把 `targetValue` 交给调用方做**吸附动画** ——
+ * 否则页面会停在半页位置。
  *
  * @param backdrop 由调用方（AppShell）通过 `rememberLayerBackdrop()` 创建，
  *   并在内容层用 `.layerBackdrop(backdrop)` 录制。
- * @param onDragFraction 拖拽过程中的实时进度（小数索引）；未拖拽时为 null。
+ * @param onDragFraction 拖拽过程中的实时进度（小数索引，基于 targetValue）。
+ * @param onDragEnd 松手回调，参数为最终小数索引（调用方据此吸附）。
  */
 @Composable
 fun LiquidGlassTabBar(
@@ -176,6 +184,7 @@ fun LiquidGlassTabBar(
     colors: LiquidGlassTabBarColors = LiquidGlassTabBarDefaults.colors(),
     liquidGlassBlurRadius: Dp = 4.dp,
     onDragFraction: ((Float) -> Unit)? = null,
+    onDragEnd: ((Float) -> Unit)? = null,
 ) {
     if (items.isEmpty()) return
 
@@ -215,6 +224,7 @@ fun LiquidGlassTabBar(
     val selectedIndexUpdated by rememberUpdatedState(selectedIndex)
     val onSelectUpdated by rememberUpdatedState(onSelect)
     val onDragFractionUpdated by rememberUpdatedState(onDragFraction)
+    val onDragEndUpdated by rememberUpdatedState(onDragEnd)
     val gestureIndices = remember { IntArray(2) }
 
     fun indexAt(positionX: Float): Int {
@@ -246,11 +256,15 @@ fun LiquidGlassTabBar(
                     currentIndex = target
                     onSelectUpdated(target)
                 }
+                // ★ 把最终小数进度交给调用方做吸附动画（否则页面停在半页）。
+                onDragEndUpdated?.invoke(targetValue)
                 updateValue(target.toFloat())
                 animationScope.launch { offsetAnimation.animateTo(0f, spring(1f, 300f, 0.5f)) }
             },
             onDragCancelled = {
                 currentIndex = gestureIndices[0]
+                // 取消也通知调用方归位（否则页面停在半页）。
+                onDragEndUpdated?.invoke(gestureIndices[0].toFloat())
                 updateValue(gestureIndices[0].toFloat())
                 animationScope.launch { offsetAnimation.animateTo(0f, spring(1f, 300f, 0.5f)) }
             },
@@ -267,7 +281,10 @@ fun LiquidGlassTabBar(
                     // ★ 用户第 5 条「划到哪切到哪」：
                     // 把当前的小数进度实时回报给调用方，让内容层（HorizontalPager）
                     // 跟着指示器同步移动，而不是等松手才跳。
-                    onDragFractionUpdated?.invoke(value)
+                    //
+                    // 用 targetValue 而非 value：value 是弹簧当前值（有延迟），
+                    // targetValue 才是手指直接映射的目标 —— 用 value 会"拖快了跟不上"。
+                    onDragFractionUpdated?.invoke(targetValue)
                     animationScope.launch {
                         offsetAnimation.snapTo(offsetAnimation.value + dragAmount.x)
                     }
