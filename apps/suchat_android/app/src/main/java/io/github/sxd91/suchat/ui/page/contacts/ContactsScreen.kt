@@ -1,10 +1,8 @@
 package io.github.sxd91.suchat.ui.page.contacts
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -65,23 +63,34 @@ import kotlin.math.roundToInt
 /**
  * 联系人页。
  *
- * ## 本轮修正（用户第 7 条）
+ * ## 索引栏 = 鱼眼（邻近缩放）
  *
- * 字母索引从「一列独立小字母（每个 20x16dp 点击区）」改成
- * **一根长条胶囊**，并支持：
+ * ★ 2026-10-02 重做（用户要求「索引栏字母本体做动态缩放」）：
  *
- *  1. **滑动选字母** —— 手指在胶囊上上下滑动即连续选字母（与微信一致），
- *     不是只能逐个点击；
- *  2. **滑动时左侧气泡** —— 当前选中的字母以一个圆角气泡显示在胶囊左侧，
- *     手指抬起后气泡淡出；
- *  3. 胶囊本身是一条**整体圆角背景**（`RoundedCornerShape(50%)`），
- *     不是散落的字母。
+ * 旧实现是「手指按住时在胶囊左侧弹出一个大字母气泡」—— 那是**单个**字母
+ * 放大，属于选中反馈。用户要的是**索引栏本身的触摸反馈动画**：把触摸点当
+ * 透镜中心，字母按「到触摸点的垂直距离」依次递减地放大 ——
+ * 离得最近的字母最大、稍远的略大、超出影响半径后恢复原大小。
  *
- * 实现要点：
- *  - 胶囊内字母用 `Column` 等分排列，通过 `onSizeChanged` 记下高度；
- *  - 手指 y 坐标 → 字母索引：`index = (y / itemHeight).roundToInt()`；
- *  - 用 `detectDragGestures` + `detectTapGestures` 组合（点按与滑动都能选）；
- *  - 气泡位置跟随手指 y（`bubbleY`），不固定居中，符合直觉。
+ * 这就是 Android 社区所称的 **FisheyeIndexBar / WaveSideBar / 波浪索引栏**。
+ *
+ * ### 三个实现要点（缺一个就不像鱼眼）
+ *
+ *  1. **触摸点取连续位置**，不是离散索引 ——
+ *     `lensY = touchY / pitch`。若只用「当前选中的字母序号」当中心，
+ *     手指滑过时会一档一档跳，放大数永远是整数位置，看着是"逐个亮"
+ *     而不是"波跟着手指走"。
+ *  2. **衰减 + smoothstep**（`t²(3-2t)`）—— 线性衰减在影响半径边缘有折角，
+ *     看起来像突然被"掐断"；smoothstep 两端导数为 0，过渡平滑。
+ *  3. **按压缩放零延迟、松手才回弹** —— 按住时若用弹簧逼近，
+ *     手指快速滑动会明显"拖后腿"；所以 `pressed` 期间用 `snap()`，
+ *     抬手瞬间切回 `spring()` 弹回 1.0。
+ *
+ * ### 为什么不画离屏 Canvas
+ *
+ * 本页字母少（A–Z + #），每个字母一个 `graphicsLayer` 缩放即可；
+ * 用 Canvas 自绘虽然省几个节点，但会失去 miuix 的文字样式（字重/字距/
+ * 主题色）与无字体回退，得不偿失。
  */
 @Composable
 fun ContactsScreen(
@@ -113,11 +122,14 @@ fun ContactsScreen(
         }
     }
 
-    // 索引条状态。
+    // 索引条状态（鱼眼）。
+    // 索引条实测高度（px）—— 用于把触摸 y 换算成「第几个字母」。
     var barHeightPx by remember { mutableFloatStateOf(0f) }
     var activeLetter by remember { mutableStateOf<String?>(null) }
-    var bubbleY by remember { mutableFloatStateOf(0f) }
-    val density = LocalDensity.current
+    // 手指是否正按在索引条上 —— 只有按下时才放大，松手立即弹回。
+    var pressed by remember { mutableStateOf(false) }
+    // 触摸点相对索引条顶部的 y（**连续值**，不是索引），鱼眼透镜中心。
+    var touchY by remember { mutableFloatStateOf(0f) }
 
     // 选字母 → 滚列表（统一入口，点按/滑动都走这里）。
     fun selectLetter(letter: String) {
@@ -236,82 +248,87 @@ fun ContactsScreen(
                 }
             }
 
-        // --- 右侧字母索引：长条胶囊 + 滑动 + 气泡 ---
+        // --- 右侧字母索引：鱼眼（Fisheye / WaveSideBar） ---
         //
-        // ★ 修正（用户反馈"滑动时胶囊向左瞬移"）：
-        // 旧结构是 `Box { 气泡; 索引条 }`，Box 宽度 wrap-content —— 气泡（44dp +
-        // 44dp 间距 = 88dp）比索引条（28dp）宽得多，气泡一出现就把 Box 撑宽，
-        // 而 Box 用 `align(CenterEnd)` 贴右，于是**索引条被挤向左边**，看起来"瞬移"。
+        // ★ 2026-10-02 重做：旧版是「胶囊 + 左侧大气泡」，用户要求改成
+        //   **字母本体按到触摸点的距离动态缩放**（波浪/鱼眼效果）。
         //
-        // 修法：外层 Box 给**固定宽度**（气泡位 + 间距 + 条宽），气泡用绝对定位
-        // 画在左侧、不参与布局，索引条固定贴右 —— 气泡出现不再影响任何布局。
+        // 关键点：
+        //  1. 透镜中心取**连续**触摸位置（touchY / pitch），不是选中字母下标 ——
+        //     否则滑动时会一档一档跳，看不到"波"跟着手指走；
+        //  2. 影响半径用「字母个数」表达（±[IndexLensRadiusLetters] 个字母内受影响），
+        //     这样不论索引条多长、字母多少，观感一致；
+        //  3. 按压缩放 `snap()`（零延迟跟手）、抬手 `spring()` 弹回 ——
+        //     按住时用动画逼近会明显拖后腿。
+        //
+        // ⚠️ pitch 必须在**回调内部**用 `barHeightPx` 现算：
+        //    pointerInput 的 lambda 只按 `letters` 重建，若把外部算好的
+        //    pitch 捕进去，首帧（高度还是 0）算出的值会被永久缓存。
+        val lensPitch = if (letters.isEmpty()) 1f else barHeightPx / letters.size
+        fun letterAt(offsetY: Float): String? =
+            letters.getOrNull((offsetY / lensPitch).toInt().coerceIn(0, letters.lastIndex))
+
         Box(
             modifier = Modifier
                 .align(Alignment.CenterEnd)
                 .fillMaxHeight(0.62f)
-                .width(IndexBubbleWidth + IndexGap + IndexBarWidth)
-                .padding(end = 6.dp),
+                .width(IndexBarWidth)
+                .pointerInput(letters) {
+                    // 滑动选字母（连续）。
+                    detectDragGestures(
+                        onDragStart = { offset ->
+                            pressed = true
+                            touchY = offset.y
+                            letterAt(offset.y)?.let { selectLetter(it) }
+                        },
+                        onDragEnd = { pressed = false; activeLetter = null },
+                        onDragCancel = { pressed = false; activeLetter = null },
+                    ) { change, _ ->
+                        touchY = change.position.y
+                        letterAt(change.position.y)?.let { selectLetter(it) }
+                        change.consume()
+                    }
+                }
+                .pointerInput(letters) {
+                    // 点按也能选（与滑动共用 selectLetter）。
+                    detectTapGestures(
+                        onPress = { offset ->
+                            pressed = true
+                            touchY = offset.y
+                            letterAt(offset.y)?.let { selectLetter(it) }
+                            tryAwaitRelease()
+                            pressed = false
+                            activeLetter = null
+                        },
+                    )
+                },
         ) {
-            // 气泡：绝对定位在左侧，垂直位置跟随手指（不参与布局）。
-            if (activeLetter != null) {
-                LetterBubble(
-                    letter = activeLetter ?: "",
-                    offsetY = with(density) {
-                        (bubbleY - barHeightPx / 2f).toDp()
-                    },
-                    modifier = Modifier.align(Alignment.CenterStart),
-                )
-            }
-
-            // 长条胶囊：固定贴右。
             Column(
                 modifier = Modifier
-                    .align(Alignment.CenterEnd)
                     .fillMaxHeight()
                     .width(IndexBarWidth)
                     .clip(RoundedCornerShape(IndexBarWidth / 2))
                     .background(c.surfaceContainerHigh.copy(alpha = 0.9f))
-                    .onSizeChanged { barHeightPx = it.height.toFloat() }
-                    .pointerInput(letters) {
-                        // 滑动选字母：手指 y → 字母索引。
-                        detectDragGestures(
-                            onDragStart = { offset ->
-                                bubbleY = offset.y
-                                val idx = ((offset.y / barHeightPx) * letters.size)
-                                    .toInt().coerceIn(0, letters.lastIndex)
-                                selectLetter(letters[idx])
-                            },
-                            onDragEnd = { activeLetter = null },
-                            onDragCancel = { activeLetter = null },
-                        ) { change, _ ->
-                            bubbleY = change.position.y
-                            val idx = ((change.position.y / barHeightPx) * letters.size)
-                                .toInt().coerceIn(0, letters.lastIndex)
-                            selectLetter(letters[idx])
-                            change.consume()
-                        }
-                    }
-                    .pointerInput(letters) {
-                        // 点按也选（与滑动共用同一 selectLetter）。
-                        detectTapGestures(
-                            onPress = { offset ->
-                                bubbleY = offset.y
-                                val idx = ((offset.y / barHeightPx) * letters.size)
-                                    .toInt().coerceIn(0, letters.lastIndex)
-                                selectLetter(letters[idx])
-                            },
-                            onTap = { activeLetter = null },
-                        )
-                    },
+                    .onSizeChanged { barHeightPx = it.height.toFloat() },
                 verticalArrangement = Arrangement.SpaceEvenly,
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                letters.forEach { letter ->
-                    MiuixText(
-                        text = letter,
-                        fontSize = 10.sp,
-                        fontWeight = if (letter == activeLetter) FontWeight.Bold else FontWeight.Normal,
-                        color = if (letter == activeLetter) c.primary else c.onSurfaceSecondary,
+                letters.forEachIndexed { index, letter ->
+                    IndexLetter(
+                        letter = letter,
+                        // ★ 鱼眼核心：透镜中心取连续位置，缩放由「距离多少个字母」决定。
+                        scale = fisheyeScale(
+                            index = index,
+                            lensPosition = if (pressed && lensPitch > 0f) {
+                                touchY / lensPitch
+                            } else {
+                                // 未按下（或高度尚未测量）：推到极远，
+                                // 所有字母都在影响半径外 → 缩放恒为 1。
+                                -1e3f
+                            },
+                        ),
+                        pressed = pressed,
+                        active = letter == activeLetter,
                     )
                 }
             }
@@ -323,37 +340,90 @@ fun ContactsScreen(
 /** 索引条宽。 */
 private val IndexBarWidth = 28.dp
 
-/** 气泡占位宽。 */
-private val IndexBubbleWidth = 44.dp
+/**
+ * 鱼眼影响半径（单位：**字母个数**，不是像素）。
+ *
+ * 为什么按字母数而不是像素：索引条高度由屏幕决定、字母数由数据决定，
+ * 两者都不固定。若用固定像素半径，字母稀疏时影响圈太小（看不出波浪）、
+ * 字母密集时又糊成一片。按「±2 个字母」表达则任何数据下观感一致：
+ * 手指压住处最大，上下各两个字母依次递减，第 3 个起回到原大小。
+ */
+private const val IndexLensRadiusLetters = 2.0f
 
-/** 气泡与索引条之间的间距。 */
-private val IndexGap = 10.dp
+/** 透镜中心（手指正压住的那个字母）的最大放大倍数。 */
+private const val IndexLensMaxScale = 1.9f
 
 /**
- * 索引气泡 —— 手指按住索引条时显示当前字母。
+ * 鱼眼缩放：算第 [index] 个字母在「透镜中心位于 [lensPosition] 时的放大倍数。
  *
- * @param offsetY 相对索引条中心点的垂直偏移（跟随手指）。
+ * ## 算法（三步）
+ *
+ * ```
+ * d = |index - lensPosition|            // 到透镜中心的距离（单位：字母）
+ * t = (1 - d / radius).coerceIn(0, 1)   // 归一化，越近越接近 1
+ * t = t²(3 - 2t)                        // smoothstep：两端导数为 0，过渡平滑
+ * scale = 1 + (maxScale - 1) · t
+ * ```
+ *
+ * ## 为什么必须用 smoothstep 而不是线性
+ *
+ * 线性衰减在 `d = radius` 处导数突变（从 -k 直接跳到 0），
+ * 字母会看到明显的「折角」—— 像被一刀切断。smoothstep 在 0 和 1
+ * 两端导数都为 0，放大-恢复的过渡是圆滑的，才像"波形"。
+ *
+ * ## 为什么透镜中心是连续值
+ *
+ * [lensPosition] 是 `touchY / itemHeight`（浮点），不是 `roundToInt()` 的结果。
+ * 若取整，手指连续滑动时中心只在整数间跳变 —— 表现为"一个一个字母轮流放大"，
+ * 而不是"波跟着手指平移"。连续中心才能让相邻两个字母同时处于中间态
+ * （比如中心 3.5 → 第 3、4 个字母各放大 70%），视觉上才是波。
+ *
+ * @param index 字母下标。
+ * @param lensPosition 透镜中心（连续值，单位同 [index]；默认 -1e3 表示无透镜）。
+ */
+private fun fisheyeScale(index: Int, lensPosition: Float): Float {
+    val distance = kotlin.math.abs(index - lensPosition)
+    val t = (1f - distance / IndexLensRadiusLetters).coerceIn(0f, 1f)
+    val smooth = t * t * (3f - 2f * t)
+    return 1f + (IndexLensMaxScale - 1f) * smooth
+}
+
+/**
+ * 索引栏里的一个字母 —— 支持鱼眼缩放。
+ *
+ * ## 两个动画归零的细节
+ *
+ *  - **按下期间用 [snap]**：手指滑动时若缩放走弹簧，会有明显"追不上"的拖尾；
+ *    `snap` 是零时长动画 = 当帧直接生效，跟手无延迟。
+ *  - **抬手用 [spring]**：松手后所有字母弹回 1.0，带一点回弹，手感 Q 弹。
+ *
+ * 缩放锚点在字母**中心**（`graphicsLayer` 默认 transformOrigin 即 0.5,0.5），
+ * 所以放大时字母向两侧均匀撑开，不是向下坠。
+ *
+ * @param pressed 是否被按住（决定用 snap 还是 spring）。
+ * @param active 是否是当前选中的字母（额外着色 + 加粗）。
  */
 @Composable
-private fun LetterBubble(
+private fun IndexLetter(
     letter: String,
-    offsetY: Dp,
-    modifier: Modifier = Modifier,
+    scale: Float,
+    pressed: Boolean,
+    active: Boolean,
 ) {
     val c = MiuixTheme.colorScheme
-    Box(
-        modifier = modifier
-            .graphicsLayer { translationY = offsetY.toPx() }
-            .size(IndexBubbleWidth)
-            .clip(RoundedCornerShape(14.dp))
-            .background(c.primary),
-        contentAlignment = Alignment.Center,
-    ) {
-        MiuixText(
-            text = letter,
-            fontSize = 22.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = c.onPrimary,
-        )
-    }
+    val animatedScale by animateFloatAsState(
+        targetValue = scale,
+        animationSpec = if (pressed) snap() else spring(dampingRatio = 0.55f, stiffness = 900f),
+        label = "indexLetterScale",
+    )
+    MiuixText(
+        text = letter,
+        fontSize = 10.sp,
+        fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
+        color = if (active) c.primary else c.onSurfaceSecondary,
+        modifier = Modifier.graphicsLayer {
+            scaleX = animatedScale
+            scaleY = animatedScale
+        },
+    )
 }

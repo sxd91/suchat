@@ -15,6 +15,8 @@ import top.yukonga.miuix.kmp.icon.extended.ContactsCircle
 import top.yukonga.miuix.kmp.icon.extended.Copy
 import top.yukonga.miuix.kmp.icon.extended.Delete
 import top.yukonga.miuix.kmp.icon.extended.Email
+import top.yukonga.miuix.kmp.icon.extended.ExpandLess
+import top.yukonga.miuix.kmp.icon.extended.ExpandMore
 import top.yukonga.miuix.kmp.icon.extended.Favorites
 import top.yukonga.miuix.kmp.icon.extended.FavoritesFill
 import top.yukonga.miuix.kmp.icon.extended.File
@@ -30,6 +32,7 @@ import top.yukonga.miuix.kmp.icon.extended.Mic
 import top.yukonga.miuix.kmp.icon.extended.More
 import top.yukonga.miuix.kmp.icon.extended.Music
 import top.yukonga.miuix.kmp.icon.extended.Notes
+import top.yukonga.miuix.kmp.icon.extended.Ok
 import top.yukonga.miuix.kmp.icon.extended.Phone
 import top.yukonga.miuix.kmp.icon.extended.Play
 import top.yukonga.miuix.kmp.icon.extended.Promotions
@@ -172,6 +175,15 @@ object SuchatIcons {
 
     /** 设置。 */
     val Settings: ImageVector get() = MiuixIcons.Regular.Settings
+
+    /** 勾选（已选中状态、设置项选择）。 */
+    val Ok: ImageVector get() = MiuixIcons.Regular.Ok
+
+    /** 展开（折叠面板收起态，点开）。 */
+    val ExpandMore: ImageVector get() = MiuixIcons.Regular.ExpandMore
+
+    /** 收起（折叠面板展开态，点收）。 */
+    val ExpandLess: ImageVector get() = MiuixIcons.Regular.ExpandLess
 
     /** 分享。 */
     val Share: ImageVector get() = MiuixIcons.Regular.Share

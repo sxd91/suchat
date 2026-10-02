@@ -7,6 +7,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
@@ -19,27 +21,40 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
 import io.github.sxd91.suchat.core.design.glass.LiquidGlassTabBar
 import io.github.sxd91.suchat.core.design.glass.TabBarMode
 import io.github.sxd91.suchat.core.design.glass.TabItem
 import io.github.sxd91.suchat.core.design.theme.SuchatRootTheme
+import io.github.sxd91.suchat.core.nav.DEPTH_PARALLAX
+import io.github.sxd91.suchat.core.nav.DEPTH_SCALE
 import io.github.sxd91.suchat.core.nav.SuchatNavigator
 import io.github.sxd91.suchat.core.nav.SuchatPage
 import io.github.sxd91.suchat.core.nav.SuchatTab
 import io.github.sxd91.suchat.core.nav.rememberSuchatNavigator
 import io.github.sxd91.suchat.ui.component.WeKitDrawer
 import io.github.sxd91.suchat.ui.component.WeKitPanelContent
+import io.github.sxd91.suchat.ui.navigation.PredictiveBackContent
+import io.github.sxd91.suchat.ui.navigation.PredictiveBackEffect
 import io.github.sxd91.suchat.ui.page.chat.ChatDetailScreen
 import io.github.sxd91.suchat.ui.page.chats.ChatsScreen
 import io.github.sxd91.suchat.ui.page.contacts.ContactsScreen
@@ -65,13 +80,24 @@ import io.github.sxd91.suchat.ui.page.secondary.OfficialAccountsScreen
 import io.github.sxd91.suchat.ui.page.secondary.ProfileScreen
 import io.github.sxd91.suchat.ui.page.secondary.SettingsScreen
 import io.github.sxd91.suchat.ui.page.secondary.TagsScreen
+import io.github.sxd91.suchat.ui.page.settings.AboutScreen
+import io.github.sxd91.suchat.ui.page.settings.AccountSecurityScreen
+import io.github.sxd91.suchat.ui.page.settings.AppearanceScreen
+import io.github.sxd91.suchat.ui.page.settings.CareModeScreen
+import io.github.sxd91.suchat.ui.page.settings.ChatSettingsScreen
+import io.github.sxd91.suchat.ui.page.settings.DevicesScreen
+import io.github.sxd91.suchat.ui.page.settings.FontSizeScreen
+import io.github.sxd91.suchat.ui.page.settings.GeneralScreen
+import io.github.sxd91.suchat.ui.page.settings.HelpScreen
+import io.github.sxd91.suchat.ui.page.settings.LocalSuchatSettings
+import io.github.sxd91.suchat.ui.page.settings.NotificationsScreen
+import io.github.sxd91.suchat.ui.page.settings.PrivacyScreen
+import io.github.sxd91.suchat.ui.page.settings.StorageScreen
+import io.github.sxd91.suchat.ui.page.settings.TeenModeScreen
+import io.github.sxd91.suchat.ui.page.settings.rememberSuchatSettings
 import io.github.sxd91.suchat.ui.setup.ServerSetupScreen
 import io.github.sxd91.suchat.ui.theme.SuchatAppearance
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
-import kotlin.math.abs
-import kotlin.math.sign
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -109,10 +135,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            val appearance = remember { SuchatAppearance() }
-            SuchatRootTheme(appearance) {
-                SuchatLauncher()
-            }
+            SuchatLauncher()
         }
     }
 }
@@ -123,17 +146,45 @@ private sealed interface AppSession {
     data class Connected(val endpoint: String) : AppSession
 }
 
+/**
+ * 应用根 —— **外观实例与设置实例在这里创建，全树共享**。
+ *
+ * ## 为什么要提到这一层
+ *
+ * 设置页（三级）要改主题、玻璃档、性能档，而这三个值必须**立刻影响整个应用**。
+ * 若把 `SuchatAppearance()` 放在更深处（或每处各造一个），改完只有局部生效。
+ *
+ * 这里的结构保证：
+ *  - [SuchatAppearance] 只有一个实例，同时传给主题层与设置页；
+ *  - [SuchatSettings] 只在根层建一次（`rememberSuchatSettings`），
+ *    通过 `LocalSuchatSettings` 下发给所有页面（含设置子页）。
+ *
+ * 注意：`SuchatRootTheme` 必须在 [CompositionLocalProvider] **内部**读
+ * appearance —— 它自身读的是同一实例的属性，写值触发重组，主题随之重算。
+ */
 @Composable
 private fun SuchatLauncher() {
     var session by remember { mutableStateOf<AppSession?>(null) }
+    val appearance = remember { SuchatAppearance() }
+    val settings = rememberSuchatSettings()
 
-    when (session) {
-        null -> ServerSetupScreen(
-            onPreview = { session = AppSession.Preview },
-            onConnected = { session = AppSession.Connected(it) },
-        )
-        is AppSession.Preview -> SuchatAppShell(statusText = "前端预览 · 未连接")
-        is AppSession.Connected -> SuchatAppShell(statusText = "已连接")
+    SuchatRootTheme(appearance) {
+        CompositionLocalProvider(LocalSuchatSettings provides settings) {
+            when (session) {
+                null -> ServerSetupScreen(
+                    onPreview = { session = AppSession.Preview },
+                    onConnected = { session = AppSession.Connected(it) },
+                )
+                is AppSession.Preview -> SuchatAppShell(
+                    statusText = "前端预览 · 未连接",
+                    appearance = appearance,
+                )
+                is AppSession.Connected -> SuchatAppShell(
+                    statusText = "已连接",
+                    appearance = appearance,
+                )
+            }
+        }
     }
 }
 
@@ -146,16 +197,31 @@ private fun SuchatLauncher() {
  *  2. **左滑** → `WeKitDrawer` 内部的手势识别（拖拽跟手）；
  *  3. 关闭：右滑 / 点遮罩 / 系统返回键。
  */
+/**
+ * 应用外壳：负一屏抽屉包住整个主 Tab 层 + 页面层。
+ *
+ * ## 层序（自下而上）
+ *
+ * ```
+ * WeKitDrawer
+ *  ├ content: 主 Tab 层（HorizontalPager + 液态玻璃底栏）
+ *  ├ 页面层（二级/三级，可堆叠，见 [PageLayerHost]）   ← 盖住底栏
+ *  └ 抽屉面板（负一屏）                                ← 盖住一切
+ * ```
+ *
+ * ## 返回键的归属（优先级从高到低）
+ *
+ *  1. **负一屏打开** → 关抽屉（`BackHandler`，占位不可预测）；
+ *  2. **页面层非空** → 交 [PredictiveBackEffect]（预测性返回：可跟手预览）；
+ *  3. **都没有** → 不注册任何回调，交还系统（系统播「退出应用」动画）。
+ */
 @Composable
-private fun SuchatAppShell(statusText: String) {
+private fun SuchatAppShell(statusText: String, appearance: SuchatAppearance) {
     val nav = rememberSuchatNavigator()
-    val scope = rememberCoroutineScope()
     var drawerOpen by remember { mutableStateOf(false) }
 
-    // 系统返回键：优先关抽屉，再弹二级页。
-    BackHandler(enabled = drawerOpen || nav.backStack.isNotEmpty()) {
-        if (drawerOpen) drawerOpen = false else nav.pop()
-    }
+    // 抽屉开着时，返回键先关抽屉。
+    BackHandler(enabled = drawerOpen) { drawerOpen = false }
 
     WeKitDrawer(
         drawerOpen = drawerOpen,
@@ -186,40 +252,256 @@ private fun SuchatAppShell(statusText: String) {
         MainTabs(
             nav = nav,
             statusText = statusText,
+            appearance = appearance,
             onAvatarClick = { drawerOpen = true },
-            onSelectTab = { index -> scope.launch { /* 由 pager 处理 */ } },
         )
 
-        // ---------- 二级页层 ----------
-        // 覆盖在主 Tab 层之上，从右滑入 / 右滑出；打开负一屏时不可交互
-        // （被抽屉内容层盖住，由 WeKitDrawer 的遮罩接管）。
-        val topPage = nav.topPage
-        AnimatedVisibility(
-            visible = topPage != null,
-            enter = slideInHorizontally(initialOffsetX = { it }, animationSpec = tween(260)),
-            exit = slideOutHorizontally(targetOffsetX = { it }, animationSpec = tween(260)),
-        ) {
-            // 退出动画期间 topPage 先变 null，需记住最后一个非空页面。
-            val renderedPage = remember { mutableStateOf<SuchatPage?>(null) }
-            LaunchedEffect(topPage) {
-                if (topPage != null) renderedPage.value = topPage
+        // ---------- 页面层（二级 / 三级） ----------
+        PageLayerHost(
+            nav = nav,
+            appearance = appearance,
+            drawerOpen = drawerOpen,
+            bottomInset = 64.dp +
+                WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding(),
+        )
+    }
+}
+
+/**
+ * 页面层宿主 —— 支持**多级堆叠**与**真·转场**。
+ *
+ * ## 为什么不能再用一个 `AnimatedVisibility`（旧实现的病根）
+ *
+ * 旧写法：
+ * ```kotlin
+ * AnimatedVisibility(visible = topPage != null) { SecondaryHost(topPage) }
+ * ```
+ * `visible` 只在「有没有二级页」这个 0/1 边界翻转。二级 → 三级时
+ * `topPage` 只是**换了个对象**，`visible` 恒为 true ⇒ **转场根本不触发**，
+ * 页面瞬间切换 —— 这正是用户说的「二级页面进入三级没有动画」。
+ *
+ * ## 现在的模型：槽位（slot）栈 + 每槽一个进入进度
+ *
+ * 每个页面是一个 [PageSlot]，持有 `enter`：
+ *
+ *  - `enter = 0`：停在屏幕右侧之外；
+ *  - `enter = 1`：完全就位。
+ *
+ * 于是转场变成**一个浮点值的动画**，而不是布局的显隐：
+ *
+ * | 场景 | 做法 |
+ * |---|---|
+ * | push | 新槽 `enter` 从 0 动画到 1（右滑入） |
+ * | pop | 栈顶槽 `enter` 从 1 动画到 0，**动画播完才从槽位表移除** |
+ * | 同层替换 | 旧槽动画退出 + 新槽动画入场 |
+ *
+ * ## 底层页的「退让」是**派生**的，不是第二套动画
+ *
+ * 底层页的位移/缩放直接取「上层槽的 `enter` 值」：
+ * ```
+ * 底层 translationX = -屏宽 × 0.28 × 上层Enter
+ * ```
+ * 上层滑进来多少，底层就退后多少；上层退出去，底层同步回位。
+ *
+ * 这样做的两个好处：
+ *  1. **没有双写入者** —— 一个值驱动两层，
+ *     不可能出现两层节奏对不上（上一轮 tab 栏踩过的坑）；
+ *  2. **预测性返回零成本接入** —— 手指拖拽时直接写栈顶槽的值，
+ *     底层会自动跟着回位，不需要为手势再写一套逻辑。
+ *
+ * ## 为什么不用 `Animatable`（重要）
+ *
+ * 试过 `Animatable` 后发现两个硬伤：
+ *  1. `snapTo` / `animateTo` 都是 **suspend**，而预测性返回的
+ *     `onProgress` 回调是同步的 —— 每帧 `launch` 一个协程会重演
+ *     「拖拽卡顿」的老问题；
+ *  2. `Animatable` 内部有 `MutatorMutex`，跟手写值与入场动画会互斥打架。
+ *
+ * 改用 **`mutableFloatStateOf` + 手写帧同步 tween**：
+ *  - 跟手 = 一次普通赋值（零协程、零锁）；
+ *  - 入场/退场 = 一个 `Job`，每帧 `withFrameNanos` 推进；
+ *  - 互斥 = 跟手时 `animJob?.cancel()`，由调用方显式管理。
+ *
+ * ## 性能纪律（复用上一轮的教训）
+ *
+ * `enter` 只在 `graphicsLayer { }` 的**绘制期 lambda** 里读 ——
+ * 每帧只失效图层，不触发重组。若在组合期读，会变成每帧重组整棵页面树。
+ */
+@Composable
+private fun PageLayerHost(
+    nav: SuchatNavigator,
+    appearance: SuchatAppearance,
+    drawerOpen: Boolean,
+    bottomInset: Dp,
+) {
+    val slots = remember { mutableStateListOf<PageSlot>() }
+    val scope = rememberCoroutineScope()
+
+    // 导航栈 → 槽位表（推送即进入、弹出保留到退场动画播完）。
+    LaunchedEffect(Unit) {
+        snapshotFlow { nav.backStack.toList() }.collect { stack ->
+            // 1) 新增页：以「屏外」为起点入场。
+            while (slots.size < stack.size) {
+                slots.add(PageSlot(stack[slots.size]).also { it.enter = 0f })
             }
-            val page = renderedPage.value ?: topPage
-            if (page != null) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(MiuixTheme.colorScheme.surface),
-                ) {
-                    SecondaryHost(
-                        page = page,
-                        nav = nav,
-                        bottomInset = 64.dp +
-                            WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding(),
-                    )
+
+            // 2) 同层替换（长度不变但栈顶换页）：旧槽退场、新槽入场。
+            stack.forEachIndexed { index, page ->
+                if (index < slots.size && slots[index].page !== page) {
+                    val old = slots[index]
+                    old.exiting = true
+                    val fresh = PageSlot(page).also { it.enter = 0f }
+                    slots[index] = fresh
+                    scope.launch { old.slideTo(0f, EXIT_MS) }
+                    scope.launch { fresh.slideTo(1f, ENTER_MS) }
+                }
+            }
+
+            // 3) 多余槽位退场（**动画播完才移除**，否则看不到退出动画）。
+            val doomed = slots.drop(stack.size).toList()
+            if (doomed.isNotEmpty()) {
+                doomed.forEach { it.exiting = true }
+                // 并发播放退场动画，**等全部播完再移除槽位**（否则看不到动画）。
+                coroutineScope {
+                    doomed.forEach { slot -> launch { slot.slideTo(0f, EXIT_MS) } }
+                }
+                slots.removeAll(doomed)
+            }
+
+            // 4) 在场槽位就位。
+            slots.forEach { slot ->
+                if (!slot.exiting && slot.enter < 1f) {
+                    scope.launch { slot.slideTo(1f, ENTER_MS) }
                 }
             }
         }
+    }
+
+    val topSlot = slots.lastOrNull()
+
+    // 预测性返回：直接驱动栈顶槽的进入进度（同步赋值，零协程）。
+    PredictiveBackEffect(
+        enabled = !drawerOpen && nav.backStack.isNotEmpty(),
+        onProgress = { progress ->
+            topSlot?.let { slot ->
+                // 手指接管 → 先掐掉在途的入场动画（否则两个写入者互相拉）。
+                slot.cancelSlide()
+                slot.enter = (1f - progress).coerceIn(0f, 1f)
+            }
+        },
+        onCommit = { nav.pop() },
+        onCancel = {
+            // 上滑撤回：栈没变，只需把进入进度弹回 1。
+            topSlot?.let { slot ->
+                if (!slot.exiting) scope.launch { slot.slideTo(1f, CANCEL_MS) }
+            }
+        },
+    )
+
+    if (slots.isEmpty()) return
+
+    Box(Modifier.fillMaxSize()) {
+        slots.forEachIndexed { index, slot ->
+            key(slot) {
+                // 上层槽（决定本层的退让量）；结构变化才会变，不进每帧热路径。
+                val above = slots.getOrNull(index + 1)
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            val enter = slot.enter
+                            val push = above?.enter ?: 0f
+                            if (appearance.reduceMotion) {
+                                // 减少动态：不位移、不缩放，只用透明度过渡。
+                                translationX = 0f
+                                alpha = enter
+                            } else {
+                                // 自身入场位移（从右侧滑入）减去被上层推回的位移。
+                                translationX = size.width * (1f - enter) -
+                                    size.width * DEPTH_PARALLAX * push
+                                val scale = 1f - (1f - DEPTH_SCALE) * push
+                                scaleX = scale
+                                scaleY = scale
+                                alpha = 1f
+                            }
+                        },
+                ) {
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .background(MiuixTheme.colorScheme.surface),
+                    ) {
+                        SecondaryHost(
+                            page = slot.page,
+                            nav = nav,
+                            appearance = appearance,
+                            bottomInset = bottomInset,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 进入动画时长（新页从右侧滑入就位）。 */
+private const val ENTER_MS = 300
+
+/** 退出动画时长（旧页滑出右侧；与预测性返回的提交时长保持一致）。 */
+private const val EXIT_MS = 260
+
+/** 取消动画时长（上滑撤回时弹回原位，略慢一点更有手感）。 */
+private const val CANCEL_MS = 200
+
+/**
+ * 页面槽位 —— 一个正在渲染（或正在退场）的二级/三级页。
+ *
+ * @property page 对应页面。
+ * @property exiting 是否已请求退场（退场动画结束前该槽仍留在槽位表中）。
+ */
+private class PageSlot(val page: SuchatPage) {
+
+    /** 进入进度：0 = 屏外右侧，1 = 完全就位。绘制期读取（见 `graphicsLayer`）。 */
+    var enter by mutableFloatStateOf(1f)
+
+    var exiting by mutableStateOf(false)
+
+    /** 在途的滑动动画；跟手时会被取消（避免两个写入者抢同一个值）。 */
+    private var slideJob: Job? = null
+
+    /** 掐掉在途动画（**非挂起**，可直接在返回手势回调里调）。 */
+    fun cancelSlide() {
+        slideJob?.cancel()
+        slideJob = null
+    }
+
+    /**
+     * 帧同步 tween 滑到 [target]。
+     *
+     * ## 两个刻意的设计
+     *
+     *  - **`withFrameNanos` 而不是 `delay(帧长)`** —— 后者与屏幕刷新率
+     *    （60Hz = 16.7ms / 120Hz = 8.3ms）错拍，采样点漂移会让动画看着"抖"
+     *    （上一轮跟随动画踩过的同款坑）；
+     *  - **起点用 `withFrameNanos` 拿第一个帧时间戳**，而不是
+     *    `System.currentTimeMillis()` —— 保证动画时间轴与 VSync 同源。
+     */
+    suspend fun slideTo(target: Float, durationMs: Int) {
+        cancelSlide()
+        val start = enter
+        if (start == target) return
+        // 登记当前协程的 Job，供 [cancelSlide] 取消（跟手接管时用）。
+        val job = currentCoroutineContext()[Job]
+        slideJob = job
+        // 时间轴与 VSync 同源：起点也用帧时间戳，不用 currentTimeMillis。
+        val startNanos = withFrameNanos { it }
+        while (true) {
+            val nowNanos = withFrameNanos { it }
+            val t = ((nowNanos - startNanos) / 1_000_000f / durationMs).coerceIn(0f, 1f)
+            enter = start + (target - start) * t
+            if (t >= 1f) break
+        }
+        if (slideJob === job) slideJob = null
     }
 }
 
@@ -228,8 +510,8 @@ private fun SuchatAppShell(statusText: String) {
 private fun MainTabs(
     nav: SuchatNavigator,
     statusText: String,
+    appearance: SuchatAppearance,
     onAvatarClick: () -> Unit,
-    onSelectTab: (Int) -> Unit,
 ) {
     val backdrop = rememberLayerBackdrop()
     val scope = rememberCoroutineScope()
@@ -239,6 +521,14 @@ private fun MainTabs(
         initialPage = nav.currentTab.ordinal,
         pageCount = { SuchatTab.entries.size },
     )
+
+    // ★ 玻璃渲染档位（设置 → 外观 → 玻璃渲染）**实时生效**：
+    //   读的是可观察的 appearance.glassMode，改设置立刻重组这里。
+    val tabBarMode = when (appearance.glassMode) {
+        "Blur" -> TabBarMode.Blur
+        "None" -> TabBarMode.None
+        else -> TabBarMode.LiquidGlass
+    }
 
     // 底栏限位：胶囊 64dp + 12dp + 手势条（只抬高滚动终点，不挡内容折射）。
     val barBottomPadding = 12.dp +
@@ -285,8 +575,8 @@ private fun MainTabs(
             selectedIndex = pagerState.targetPage,
             onSelect = { index -> scope.launch { pagerState.animateScrollToPage(index) } },
             backdrop = backdrop,
-            // 外观三档：默认 LiquidGlass（契约默认值）。
-            mode = TabBarMode.LiquidGlass,
+            // 外观档位（设置页可改，改完即时生效）。
+            mode = tabBarMode,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(bottom = barBottomPadding),
@@ -296,7 +586,12 @@ private fun MainTabs(
 
 /** 二级页路由分发。 */
 @Composable
-private fun SecondaryHost(page: SuchatPage, nav: SuchatNavigator, bottomInset: Dp) {
+private fun SecondaryHost(
+    page: SuchatPage,
+    nav: SuchatNavigator,
+    appearance: SuchatAppearance,
+    bottomInset: Dp,
+) {
     when (page) {
         is SuchatPage.ChatDetail -> ChatDetailScreen(nav = nav, chatId = page.chatId)
         is SuchatPage.ContactDetail -> ContactDetailScreen(
@@ -321,6 +616,23 @@ private fun SecondaryHost(page: SuchatPage, nav: SuchatNavigator, bottomInset: D
         SuchatPage.Stickers -> StickersScreen(nav = nav, bottomInset = bottomInset)
         SuchatPage.Settings -> SettingsScreen(nav = nav, bottomInset = bottomInset)
         SuchatPage.Profile -> ProfileScreen(nav = nav, bottomInset = bottomInset)
+
+        // --- 设置子页（三级，depth = 2） ---
+        SuchatPage.SetAccountSecurity -> AccountSecurityScreen(nav = nav, bottomInset = bottomInset)
+        SuchatPage.SetNotifications -> NotificationsScreen(nav = nav, bottomInset = bottomInset)
+        SuchatPage.SetChat -> ChatSettingsScreen(nav = nav, bottomInset = bottomInset)
+        SuchatPage.SetPrivacy -> PrivacyScreen(nav = nav, bottomInset = bottomInset)
+        SuchatPage.SetGeneral -> GeneralScreen(nav = nav, bottomInset = bottomInset)
+        SuchatPage.SetTeenMode -> TeenModeScreen(nav = nav, bottomInset = bottomInset)
+        SuchatPage.SetCareMode -> CareModeScreen(nav = nav, bottomInset = bottomInset)
+        SuchatPage.SetAppearance -> AppearanceScreen(
+            nav = nav, appearance = appearance, bottomInset = bottomInset,
+        )
+        SuchatPage.SetStorage -> StorageScreen(nav = nav, bottomInset = bottomInset)
+        SuchatPage.SetFontSize -> FontSizeScreen(nav = nav, bottomInset = bottomInset)
+        SuchatPage.SetAbout -> AboutScreen(nav = nav, bottomInset = bottomInset)
+        SuchatPage.SetHelp -> HelpScreen(nav = nav, bottomInset = bottomInset)
+        SuchatPage.SetDevices -> DevicesScreen(nav = nav, bottomInset = bottomInset)
     }
 }
 

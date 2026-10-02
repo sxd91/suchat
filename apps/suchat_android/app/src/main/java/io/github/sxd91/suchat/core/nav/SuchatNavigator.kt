@@ -118,6 +118,29 @@ sealed class SuchatPage {
     /** 路由标识：用于 Saveable 的序列化，值与页面一一对应。 */
     abstract val routeKey: String
 
+    /**
+     * 页面层级：1 = 二级页，2 = 三级页。
+     *
+     * ★ 2026-10-02 新增（用户反馈「二级页面进入三级没有动画」）。
+     *
+     * ## 为什么需要「层级」这个概念
+     *
+     * 旧实现把整个二级层写成一个 `AnimatedVisibility(visible = topPage != null)` ——
+     * `visible` 只在「有没有二级页」这个 0/1 边界上翻转，
+     * 而**二级页 → 三级页时 topPage 只是换了个对象，visible 始终是 true**，
+     * 于是转场根本不触发，页面是**瞬间**切换的。
+     *
+     * 要让转场有「层级」语义，得先知道新页面是**同位**还是**更深一层**：
+     *  - 同层（二级 → 二级，如 设置 → 关于）：旧的右滑出、新的右滑入；
+     *  - 更深（二级 → 三级，如 设置 → 账号与安全）：新页从右侧滑入盖住，
+     *    底层页按 [DEPTH_PARALLAX] 左移并轻微缩小（微信/iOS 的导航堆叠观感）。
+     *
+     * 层级不当数据存（避免 push 时还要带 level 参数），而是页面的**静态属性**：
+     * 层级由页面在信息架构中的位置唯一决定，跟「怎么进去的」无关 ——
+     * 从「我」直接进「账号与安全」（假如以后这样做）它仍然是三级页。
+     */
+    open val depth: Int get() = 1
+
     // --- 微信 ---
     /** 聊天会话页。 */
     data class ChatDetail(val chatId: String) : SuchatPage() {
@@ -237,6 +260,89 @@ sealed class SuchatPage {
         override val routeKey: String get() = "profile"
     }
 
+    // --- 设置子页（三级，depth = 2） ---
+    //
+    // 这些页面挂在「设置」下面，属于三级导航层级。
+    // 命名统一加 Set 前缀，避免与其它页面重名（Kotlin 的 sealed 子类名唯一）。
+
+    /** 账号与安全（三级）。 */
+    data object SetAccountSecurity : SuchatPage() {
+        override val routeKey: String get() = "settings/account_security"
+        override val depth: Int get() = 2
+    }
+
+    /** 新消息通知（三级）。 */
+    data object SetNotifications : SuchatPage() {
+        override val routeKey: String get() = "settings/notifications"
+        override val depth: Int get() = 2
+    }
+
+    /** 聊天设置（三级）。 */
+    data object SetChat : SuchatPage() {
+        override val routeKey: String get() = "settings/chat"
+        override val depth: Int get() = 2
+    }
+
+    /** 隐私（三级）。 */
+    data object SetPrivacy : SuchatPage() {
+        override val routeKey: String get() = "settings/privacy"
+        override val depth: Int get() = 2
+    }
+
+    /** 通用（三级）。 */
+    data object SetGeneral : SuchatPage() {
+        override val routeKey: String get() = "settings/general"
+        override val depth: Int get() = 2
+    }
+
+    /** 青少年模式（三级）。 */
+    data object SetTeenMode : SuchatPage() {
+        override val routeKey: String get() = "settings/teen_mode"
+        override val depth: Int get() = 2
+    }
+
+    /** 关怀模式（三级）。 */
+    data object SetCareMode : SuchatPage() {
+        override val routeKey: String get() = "settings/care_mode"
+        override val depth: Int get() = 2
+    }
+
+    /** 外观（三级）：主题/玻璃档/性能档/页面转场，改完即时生效。 */
+    data object SetAppearance : SuchatPage() {
+        override val routeKey: String get() = "settings/appearance"
+        override val depth: Int get() = 2
+    }
+
+    /** 存储空间（三级）。 */
+    data object SetStorage : SuchatPage() {
+        override val routeKey: String get() = "settings/storage"
+        override val depth: Int get() = 2
+    }
+
+    /** 字体大小（三级）。 */
+    data object SetFontSize : SuchatPage() {
+        override val routeKey: String get() = "settings/font_size"
+        override val depth: Int get() = 2
+    }
+
+    /** 关于 Suchat（三级）。 */
+    data object SetAbout : SuchatPage() {
+        override val routeKey: String get() = "settings/about"
+        override val depth: Int get() = 2
+    }
+
+    /** 帮助与反馈（三级）。 */
+    data object SetHelp : SuchatPage() {
+        override val routeKey: String get() = "settings/help"
+        override val depth: Int get() = 2
+    }
+
+    /** 解除封禁 / 登录设备管理（三级）。 */
+    data object SetDevices : SuchatPage() {
+        override val routeKey: String get() = "settings/devices"
+        override val depth: Int get() = 2
+    }
+
     companion object {
         /**
          * 由 [routeKey] 反解页面。
@@ -265,6 +371,19 @@ sealed class SuchatPage {
             key == "stickers" -> Stickers
             key == "settings" -> Settings
             key == "profile" -> Profile
+            key == "settings/account_security" -> SetAccountSecurity
+            key == "settings/notifications" -> SetNotifications
+            key == "settings/chat" -> SetChat
+            key == "settings/privacy" -> SetPrivacy
+            key == "settings/general" -> SetGeneral
+            key == "settings/teen_mode" -> SetTeenMode
+            key == "settings/care_mode" -> SetCareMode
+            key == "settings/appearance" -> SetAppearance
+            key == "settings/storage" -> SetStorage
+            key == "settings/font_size" -> SetFontSize
+            key == "settings/about" -> SetAbout
+            key == "settings/help" -> SetHelp
+            key == "settings/devices" -> SetDevices
             key.startsWith("chat/") -> ChatDetail(key.removePrefix("chat/"))
             key.startsWith("contact/") -> ContactDetail(key.removePrefix("contact/"))
             else -> null
@@ -277,3 +396,20 @@ sealed class SuchatPage {
 fun rememberSuchatNavigator(): SuchatNavigator = rememberSaveable(saver = SuchatNavigator.Saver) {
     SuchatNavigator()
 }
+
+/**
+ * 导航层「层级视差」常量（由 `MainActivity.SecondaryHost` 消费）。
+ *
+ * ## 语义：底层页在新页滑入时如何让位
+ *
+ * 微信/iOS 的导航堆叠观感来自「上层推出、下层退后」：
+ *  - [DEPTH_PARALLAX] = 底层页左移的比例（相对屏宽）；
+ *  - [DEPTH_SCALE] = 底层页缩小的幅度。
+ *
+ * 这两个值只在「跨层级 push」（如 二级 → 三级）时生效；
+ * 同层 push（二级 → 二级）时旧页是整屏滑出，不做视差 —— 否则会看着像"陷进去"。
+ */
+const val DEPTH_PARALLAX: Float = 0.28f
+
+/** 见 [DEPTH_PARALLAX]。 */
+const val DEPTH_SCALE: Float = 0.94f

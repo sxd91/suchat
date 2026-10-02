@@ -9,17 +9,54 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 
 enum class SuchatThemeMode { System, Light, Dark }
 
-data class SuchatAppearance(
-    val themeMode: SuchatThemeMode = SuchatThemeMode.System,
-    val glassMode: String = "LiquidGlass",
-    val performance: String = "Full",
-    val transition: String = "Shared Element",
-)
+/**
+ * 外观配置 —— **可观察**，改动立刻全应用生效。
+ *
+ * ## 为什么是 class 而不是 data class
+ *
+ * 旧实现是 `data class SuchatAppearance(...)`，且只在一处构造
+ * （`androidx.compose.runtime.remember { SuchatAppearance() }`）——
+ * 设置页想改它就再也改不动（值不可变、且没有跨页面共享）。
+ *
+ * 现在改成用 `mutableStateOf` 持有各字段的普通类：
+ *  - 设置页写 `appearance.themeMode = SuchatThemeMode.Dark`
+ *    → 触发重组 → [io.github.sxd91.suchat.core.design.theme.SuchatRootTheme]
+ *    重算配色 → **全应用实时变色**，不需要重进页面、更不需要重启；
+ *  - 因为是同一个实例在树里共享（CompositionLocal），各处读到的永远一致。
+ *
+ * ## 三个字段都对应契约里的显式设置（`docs/android-experience.md`）
+ *
+ * 契约明确要求这些设置**不由设备能力启发式推断**，必须是用户显式选择 ——
+ * 所以它们既是持久化项（见 [io.github.sxd91.suchat.ui.page.settings.BoolKey] /
+ * `ChoiceKey`），也是这里的热切换项。
+ *
+ * @param themeMode 深浅色（System / Light / Dark）。
+ * @param glassMode 玻璃渲染档（LiquidGlass / Blur / None）。
+ * @param performance 性能档（Full / Balanced / Battery）。
+ * @param transition 页面转场风格（Shared Element / Miuix / AOSP / Fade）。
+ * @param reduceMotion 减少动态效果（替换为短淡化）。
+ */
+class SuchatAppearance(
+    themeMode: SuchatThemeMode = SuchatThemeMode.System,
+    glassMode: String = "LiquidGlass",
+    performance: String = "Full",
+    transition: String = "Shared Element",
+    reduceMotion: Boolean = false,
+) {
+    var themeMode: SuchatThemeMode by mutableStateOf(themeMode)
+    var glassMode: String by mutableStateOf(glassMode)
+    var performance: String by mutableStateOf(performance)
+    var transition: String by mutableStateOf(transition)
+    var reduceMotion: Boolean by mutableStateOf(reduceMotion)
+}
 
 private val AuroraLight = lightColorScheme(
     primary = Color(0xFF2D6EAF), primaryContainer = Color(0xFFD2E4FF), onPrimary = Color.White,

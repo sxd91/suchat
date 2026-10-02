@@ -502,18 +502,66 @@ fun SettingsScreen(nav: SuchatNavigator, bottomInset: Dp = 0.dp) {
         ) {
             item(key = "g1") {
                 Column(Modifier.background(c.surface)) {
-                    SuchatEntryRow("账号与安全", SuchatIcons.Me, onClick = {})
-                    SuchatEntryRow("青少年模式", SuchatIcons.Favorites, onClick = {})
-                    SuchatEntryRow("关怀模式", SuchatIcons.Settings, onClick = {}, showDivider = false)
+                    SuchatEntryRow(
+                        "账号与安全",
+                        SuchatIcons.Me,
+                        onClick = { nav.push(SuchatPage.SetAccountSecurity) },
+                    )
+                    SuchatEntryRow(
+                        "青少年模式",
+                        SuchatIcons.Favorites,
+                        trailingText = "未开启",
+                        onClick = { nav.push(SuchatPage.SetTeenMode) },
+                    )
+                    SuchatEntryRow(
+                        "关怀模式",
+                        SuchatIcons.Settings,
+                        trailingText = "未开启",
+                        onClick = { nav.push(SuchatPage.SetCareMode) },
+                        showDivider = false,
+                    )
                 }
             }
             item(key = "g2") {
                 Spacer(Modifier.height(8.dp))
                 Column(Modifier.background(c.surface)) {
-                    SuchatEntryRow("新消息通知", SuchatIcons.Chats, onClick = {})
-                    SuchatEntryRow("聊天", SuchatIcons.Messages, onClick = {})
-                    SuchatEntryRow("隐私", SuchatIcons.Lock, onClick = {})
-                    SuchatEntryRow("通用", SuchatIcons.Settings, onClick = {}, showDivider = false)
+                    SuchatEntryRow(
+                        "新消息通知",
+                        SuchatIcons.Chats,
+                        onClick = { nav.push(SuchatPage.SetNotifications) },
+                    )
+                    SuchatEntryRow(
+                        "聊天",
+                        SuchatIcons.Messages,
+                        onClick = { nav.push(SuchatPage.SetChat) },
+                    )
+                    SuchatEntryRow(
+                        "隐私",
+                        SuchatIcons.Lock,
+                        onClick = { nav.push(SuchatPage.SetPrivacy) },
+                    )
+                    SuchatEntryRow(
+                        "通用",
+                        SuchatIcons.Settings,
+                        onClick = { nav.push(SuchatPage.SetGeneral) },
+                        showDivider = false,
+                    )
+                }
+            }
+            item(key = "g3") {
+                Spacer(Modifier.height(8.dp))
+                Column(Modifier.background(c.surface)) {
+                    SuchatEntryRow(
+                        "帮助与反馈",
+                        SuchatIcons.Help,
+                        onClick = { nav.push(SuchatPage.SetHelp) },
+                    )
+                    SuchatEntryRow(
+                        "关于 Suchat",
+                        SuchatIcons.Help,
+                        onClick = { nav.push(SuchatPage.SetAbout) },
+                        showDivider = false,
+                    )
                 }
             }
             item(key = "about") {
