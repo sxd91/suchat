@@ -385,9 +385,10 @@ fun LiquidGlassTabBar(
         LaunchedEffect(dampedDragAnimation) {
             snapshotFlow { externalFractionUpdated?.invoke() }.collectLatest { fraction ->
                 if (fraction == null) {
-                    // 页面手势结束（或未在滑动）：玻璃收尾回位。
-                    // release() 只在「之前确实在跟随」时调一次，避免重复触发。
+                    // 页面手势结束（或未在滑动）：清除线性跟随目标，
+                    // 再交给 release() 的弹簧做收尾（回位）。
                     if (pageDragFraction != null && !dampedDragAnimation.isGestureActive) {
+                        dampedDragAnimation.clearFollowTarget()
                         dampedDragAnimation.release()
                     }
                     pageDragFraction = null
@@ -407,8 +408,9 @@ fun LiquidGlassTabBar(
                     pagePressActive = true
                     dampedDragAnimation.press()
                 }
-                // 实时跟随页面进度（通道 + 单消费者，见 snapToValue）。
-                dampedDragAnimation.snapToValue(fraction)
+                // ★ 用户要求「线性速度」：不 snapTo 硬锁死，改为匀速逼近目标。
+                // 玻璃以恒定速度追向页面进度 —— 平滑、有速度感、不生硬。
+                dampedDragAnimation.followValueLinearly(fraction)
             }
         }
     }

@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlin.math.abs
+import kotlin.math.sign
 
 class DampedDragAnimation(
     private val animationScope: CoroutineScope,
@@ -86,6 +87,29 @@ class DampedDragAnimation(
         kotlinx.coroutines.channels.Channel.CONFLATED,
     )
 
+    /**
+     * 线性跟随目标（**页面手势**专用）。null = 无跟随。
+     *
+     * ## ★ 2026-10-02 新增（用户反馈）
+     *
+     * > 「页面滑动做成线性速度，不然直接锁死跟随看起来不好看」
+     *
+     * 旧实现用 [snapToValue] 把玻璃**瞬间对齐**页面进度 ——
+     * 值每帧被硬写成页面值，视觉上是「锁死跟随」，生硬、没有速度感。
+     *
+     * 现在改为**匀速逼近**：玻璃以恒定速度（[followSpeedPerSecond] 页/秒）
+     * 追向目标，跨页用固定时长，观感是平滑的线性跟随。
+     *
+     * ## 两种跟随的语义区分（勿混）
+     *
+     *  - **手指按住玻璃拖动** → 直接控制，必须**即时**跟手（[dragValueChannel]）；
+     *  - **手指滑动页面** → 间接驱动，玻璃**匀速追**（本字段）。
+     */
+    private val followTarget = kotlinx.coroutines.flow.MutableStateFlow<Float?>(null)
+
+    /** 线性跟随速度：每秒跨越的页数（≈167ms 跨一页）。 */
+    private val followSpeedPerSecond = 6f
+
     init {
         // 唯一的消费协程：串行把跟手值写进动画值。
         animationScope.launch {
@@ -93,6 +117,37 @@ class DampedDragAnimation(
                 valueAnimation.snapTo(value)
             }
         }
+        // ★ 线性跟随协程：以恒定速度逼近 followTarget（页面手势驱动）。
+        // 单协程 + 定步长 → 匀速、无竞争、无每帧协程分配。
+        animationScope.launch {
+            val frameMs = 8L
+            val step = followSpeedPerSecond * (frameMs / 1000f)
+            while (true) {
+                val target = followTarget.value
+                if (target == null) {
+                    delay(frameMs)
+                    continue
+                }
+                val current = valueAnimation.value
+                val diff = target - current
+                if (abs(diff) <= step) {
+                    valueAnimation.snapTo(target)
+                } else {
+                    valueAnimation.snapTo(current + step * diff.sign)
+                }
+                delay(frameMs)
+            }
+        }
+    }
+
+    /** 页面手势驱动：设置线性跟随目标（玻璃匀速追向它）。 */
+    fun followValueLinearly(value: Float) {
+        followTarget.value = value.coerceIn(valueRange)
+    }
+
+    /** 清除线性跟随目标（页面手势结束，交给 [release] 的弹簧收尾）。 */
+    fun clearFollowTarget() {
+        followTarget.value = null
     }
 
     val value: Float get() = valueAnimation.value
