@@ -257,47 +257,37 @@ private fun MainTabs(
     //  1. 「玻璃滑动时界面也要线性移动」
     //  2. 「是曲线速度先快后慢」
     //  3. 「玻璃怎么一抽一抽的」
+    //  4. 「滑动时页面跟随依旧不丝滑」
     //
-    // ## 最终实现：帧同步 + 指数逼近（与玻璃侧完全一致）
+    // ## ★ 最终实现：单级映射（去掉双级延迟）
     //
-    // 旧实现把玻璃位置**直接映射**成页面位移（一次 scrollBy 到位）——
-    // 页面瞬间对齐玻璃，是"锁死跟随"。
-    // 中间版本用固定步长逼近，会在目标两侧过冲回退 → "一抽一抽"。
+    // 之前经历两次错误：
+    //  - v1 一次 scrollBy 到位 → 页面瞬间跳（"锁死跟随"）；
+    //  - v2 页面自己也做指数逼近 → **两级延迟叠加**：
+    //        手指 → 玻璃（延迟1） → 页面（延迟2）
+    //    页面明显滞后于手指，观感"不丝滑"。
     //
-    // 现在：**帧同步**（withFrameNanos）+ **指数逼近**
-    // `value += diff * (1 - exp(-dt/tau))` ——
-    // 距离大时快、接近时自然放慢（先快后慢），数学上永不过冲。
+    // 正确做法：**玻璃值本身已经是平滑曲线**（指数逼近的结果），
+    // 页面只需**即时映射**它 —— 于是页面的运动曲线 = 玻璃的曲线，
+    // 既平滑（有加速减速）又不滞后（无第二级延迟）。
+    //
+    // 所以这里回到「每帧直接 scroll 到目标」，但目标值来自玻璃的平滑输出，
+    // 因此画面是曲线的，而不是瞬移。
     val pageTargetFraction = remember { MutableStateFlow<Float?>(null) }
 
-    // 唯一消费者：帧同步 + 指数逼近地把页面推进到目标小数索引。
+    // 唯一消费者：帧同步地把页面**映射**到目标（目标已是平滑值）。
     LaunchedEffect(pagerState) {
-        // 时间常数（秒）：越小越快。与玻璃侧同值，保证两侧同步。
-        val tauSeconds = 0.06f
-        var lastFrameNs = 0L
         while (true) {
-            val frameNs = androidx.compose.runtime.withFrameNanos { it }
-            val target = pageTargetFraction.value
-            if (target == null) {
-                lastFrameNs = frameNs
-                continue
-            }
-            val dtSeconds = if (lastFrameNs == 0L) {
-                0.016f
-            } else {
-                ((frameNs - lastFrameNs) / 1_000_000_000.0).toFloat().coerceIn(0.001f, 0.05f)
-            }
-            lastFrameNs = frameNs
-
+            // 与渲染帧严格对齐 —— 每帧只更新一次，不抖不跳。
+            androidx.compose.runtime.withFrameNanos { it }
+            val target = pageTargetFraction.value ?: continue
             val pageWidthPx = pagerState.layoutInfo.pageSize.toFloat()
             if (pageWidthPx <= 0f) continue
-
             val current = pagerState.currentPage + pagerState.currentPageOffsetFraction
             val diff = target - current
             if (abs(diff) < 0.0005f) continue
-
-            // 指数逼近（先快后慢、无过冲）。
-            val alpha = 1f - kotlin.math.exp(-dtSeconds / tauSeconds)
-            pagerState.scroll { scrollBy(diff * alpha * pageWidthPx) }
+            // 直接对齐（单级映射，无额外逼近延迟）。
+            pagerState.scroll { scrollBy(diff * pageWidthPx) }
         }
     }
 
@@ -386,18 +376,29 @@ private fun MainTabs(
                     draggingTab = false
                 }
             },
-            // ② 页面 → 玻璃：把 pager 的实时小数索引（含拖拽中的 offsetFraction）
-            //    回报给底栏。返回 null 表示页面未在手势中（玻璃应回位）。
+            // ② 页面 → 玻璃：把 pager 的实时小数索引回报给底栏。
             //
-            // ★ 2026-10-02 修正（用户反馈「玻璃怎么一抽一抽的」）：
-            // 拖玻璃期间必须返回 null —— 否则形成反馈环：
-            //   手指推页面 → 页面 offsetFraction 变化 → 又驱动玻璃跟随 → 抢手指的值。
-            // 手指按住时玻璃由手指独占（跟手优先），本链路让位。
+            // ## ★ 2026-10-02 修正（用户反馈「滑动时页面跟随依旧不丝滑」+「玻璃状态重置」）
+            //
+            // 旧判定 `offset == 0f && currentPage == targetPage` 有两个问题：
+            //  1. **浮点精确比较**：pager 动画收尾时 offsetFraction 是极小的
+            //     非零浮点（如 1e-7），`== 0f` 永不成立 → 长时间返回数值 →
+            //     玻璃一直处于"跟随中"却在几乎不动 → 观感卡顿；
+            //  2. **停稳瞬间硬切 null**：从"有值"到 null 是突变，
+            //     玻璃位置从跟随值直接跳到 release 收尾 → 不丝滑。
+            //
+            // 修法：
+            //  - 用**阈值**（0.001）判定停稳，而非精确相等；
+            //  - 停稳后仍返回**当前真实索引**（整数页），让玻璃平滑收敛到整数位，
+            //    而不是突然切 null；只有真正静止时才交还控制权。
             externalFractionProvider = externalProvider@{
+                // 拖玻璃期间完全让位（手指独占，防反馈环）。
                 if (draggingTab) return@externalProvider null
+                val page = pagerState.currentPage
                 val offset = pagerState.currentPageOffsetFraction
-                val settled = offset == 0f && pagerState.currentPage == pagerState.targetPage
-                if (settled) null else pagerState.currentPage + offset
+                // 阈值判定：避免浮点残差导致"永远在跟随"。
+                if (abs(offset) < 0.001f) return@externalProvider null
+                page + offset
             },
             modifier = Modifier
                 .align(Alignment.BottomCenter)

@@ -334,13 +334,6 @@ fun LiquidGlassTabBar(
                         (targetValue + dragAmount.x / tabWidthPx * if (isLtr) 1f else -1f)
                             .fastCoerceIn(0f, (tabsCount - 1).toFloat())
                     )
-                    // ★ 用户第 5 条「划到哪切到哪」：
-                    // 把当前的小数进度实时回报给调用方，让内容层（HorizontalPager）
-                    // 跟着指示器同步移动，而不是等松手才跳。
-                    //
-                    // 用 targetValue 而非 value：value 是弹簧当前值（有延迟），
-                    // targetValue 才是手指直接映射的目标 —— 用 value 会"拖快了跟不上"。
-                    onDragFractionUpdated?.invoke(targetValue)
                     animationScope.launch {
                         offsetAnimation.snapTo(offsetAnimation.value + dragAmount.x)
                     }
@@ -356,20 +349,32 @@ fun LiquidGlassTabBar(
 
     LaunchedEffect(dampedDragAnimation) {
         snapshotFlow { selectedIndexUpdated }.collectLatest { index ->
-            // ★ 2026-10-02 修正（用户反馈「玻璃消失的时机」+ 优先级 + 卡顿）：
+            // ★ 2026-10-02 四次修正（用户反馈「每次切换页面液态玻璃状态都要重置一次」）：
             //
-            // 优先级规则：**优先识别是否松手（手动拖动中）→ 再识别是否切换页面**。
+            // ## 根因：双写入者冲突（切页场景）
             //
-            // 两类手势期间，外部同步都必须让位：
-            //  ① 手指按住玻璃（`isGestureActive`）：会与 onDrag 抢 valueAnimation；
-            //  ② 手指滑动页面（`pageDragFraction != null`）：会与跟手 snapTo 抢
-            //     （这是"划着一卡一卡的"的主因：spring 与 snapTo 互相取消重启）。
-            if (dampedDragAnimation.isGestureActive) return@collectLatest
-            if (pageDragFraction != null) return@collectLatest
+            // 切页时 `selectedIndex`（= pagerState.targetPage）会立刻变成目标页，
+            // 本链路随即 `animateToValue(index)` 启动 spring 动画；
+            // **同时** `externalFractionProvider` 也在输出（pager 正在动画移动），
+            // 那条链路用 `followValueLinearly` 写同一个 `valueAnimation`。
+            //
+            // 两条链路交替写 → spring 被反复取消重启 →
+            // 指示器跳变、玻璃按压态被打断 —— 用户看到的"状态重置"。
+            //
+            // ## 修法：单一数据源
+            //
+            // 只要外部提供了「页面进度源」（[externalFractionProvider]），
+            // 玻璃位置就**完全由它驱动** —— 它是 pager 的真实位置，
+            // 已经覆盖了「点击切页动画」与「手势滑动」两种场景。
+            // 本链路退化为**只更新逻辑索引**（高亮/语义），不再插手动画。
             if (currentIndex != index) {
                 currentIndex = index
-                dampedDragAnimation.animateToValue(index.toFloat())
             }
+            if (externalFractionProvider != null) return@collectLatest
+            // 没有外部进度源时（组件被单独使用），才由本链路驱动动画。
+            if (dampedDragAnimation.isGestureActive) return@collectLatest
+            if (pageDragFraction != null) return@collectLatest
+            dampedDragAnimation.animateToValue(index.toFloat())
         }
     }
 
@@ -399,15 +404,17 @@ fun LiquidGlassTabBar(
         LaunchedEffect(dampedDragAnimation) {
             snapshotFlow { externalFractionUpdated?.invoke() }.collectLatest { fraction ->
                 if (fraction == null) {
-                    // 页面手势结束（或未在滑动）：清除线性跟随目标，
-                    // 再交给 release() 的弹簧做收尾（回位）。
+                    // 页面已停稳：清除跟随目标，交给 release() 弹簧收尾。
+                    //
+                    // ★ 2026-10-02 修正（「不丝滑」）：
+                    // 这里**只在确实处于跟随态时**才 release 一次，
+                    // 避免停稳后反复触发 release/press 抖动。
                     if (pageDragFraction != null && !dampedDragAnimation.isGestureActive) {
                         dampedDragAnimation.clearFollowTarget()
                         dampedDragAnimation.release()
+                        pagePressActive = false
                     }
                     pageDragFraction = null
-                    // 复位按压标志，下次手势可重新激活。
-                    pagePressActive = false
                     return@collectLatest
                 }
                 // 拖玻璃期间本链路完全让位（优先级：手动 > 页面）。
@@ -422,8 +429,7 @@ fun LiquidGlassTabBar(
                     pagePressActive = true
                     dampedDragAnimation.press()
                 }
-                // ★ 用户要求「线性速度」：不 snapTo 硬锁死，改为匀速逼近目标。
-                // 玻璃以恒定速度追向页面进度 —— 平滑、有速度感、不生硬。
+                // ★ 曲线速度（先快后慢）：指数逼近，不硬锁死。
                 dampedDragAnimation.followValueLinearly(fraction)
             }
         }
@@ -436,6 +442,37 @@ fun LiquidGlassTabBar(
                 onSelectUpdated(index)
             }
             dampedDragAnimation.animateToValue(index.toFloat())
+        }
+    }
+
+    // ★ 2026-10-02 新增（用户反馈「滑动时页面跟随依旧不丝滑」）：
+    //
+    // ## 真因
+    //
+    // 旧实现在 `onDrag` 手势回调里把 `targetValue`（手指原始目标）报给调用方。
+    // 但 `targetValue` 是**跳变**的（手指位移直接累加），而玻璃本体走 spring
+    // 是**平滑**的 —— 两者不同源：
+    //
+    //   手指目标（跳变）→ 页面（跳变前进）
+    //   玻璃弹簧（平滑）→ 指示器（平滑前进）
+    //
+    // 于是页面与指示器各走各的，页面显得"顿、不丝滑"。
+    //
+    // ## 修法
+    //
+    // 改为**每帧汇报玻璃的真实平滑值**（`dampedDragAnimation.value`）——
+    // 页面跟着玻璃的曲线走，两者天然同源、完全同步。
+    //
+    // 只在「手指按住玻璃」期间汇报（`isGestureActive`）；
+    // 其余场景由 [externalFractionProvider] 反向驱动，两条链路互斥不打架。
+    if (onDragFraction != null) {
+        LaunchedEffect(dampedDragAnimation) {
+            while (true) {
+                androidx.compose.runtime.withFrameNanos { it }
+                if (dampedDragAnimation.isGestureActive) {
+                    onDragFractionUpdated?.invoke(dampedDragAnimation.value)
+                }
+            }
         }
     }
 
