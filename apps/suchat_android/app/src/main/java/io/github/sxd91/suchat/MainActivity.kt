@@ -240,11 +240,6 @@ private fun MainTabs(
         pageCount = { SuchatTab.entries.size },
     )
 
-    // ★ 关键：拖拽底栏期间，必须**暂停**导航状态 → pager 的同步。
-    // 否则 LaunchedEffect(nav.currentTab) 会同时 animateScrollToPage，
-    // 与手指的 scroll {} 抢驱动权 —— 表现为页面抖动 + 玻璃采样错乱（"玻璃消失"）。
-    var draggingTab by remember { mutableStateOf(false) }
-
     // 底栏限位：胶囊 64dp + 12dp + 手势条（只抬高滚动终点，不挡内容折射）。
     val barBottomPadding = 12.dp +
         WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
@@ -258,9 +253,7 @@ private fun MainTabs(
         }
     }
     // 导航状态 → pager（点击底栏时的跳转）。
-    // 拖拽中跳过：此时由手指驱动，不能抢。
-    LaunchedEffect(nav.currentTab, draggingTab) {
-        if (draggingTab) return@LaunchedEffect
+    LaunchedEffect(nav.currentTab) {
         val target = nav.currentTab.ordinal
         if (pagerState.currentPage != target || pagerState.targetPage != target) {
             pagerState.animateScrollToPage(target)
@@ -292,53 +285,13 @@ private fun MainTabs(
             selectedIndex = pagerState.targetPage,
             onSelect = { index -> scope.launch { pagerState.animateScrollToPage(index) } },
             backdrop = backdrop,
+            // 外观三档：默认 LiquidGlass（契约默认值）。
             mode = TabBarMode.LiquidGlass,
-            // ★ 「划到哪切到哪」+ 保持平移动画 + 玻璃不消失。
-            //
-            // 药方：用 pager 自己的**手势驱动 API**（scroll { scrollBy }）逐帧跟随，
-            // 而**不是** scrollToPage（离散跳页）——
-            //  - scrollToPage 是"瞬移"，没有平移动画；
-            //  - 每帧 launch 协程还会与 LaunchedEffect(nav.currentTab) 的
-            //    animateScrollToPage 打架，pager 高频抖动 → 底栏 backdrop 录制错乱
-            //    → 玻璃看起来"自己消失变成普通 tab"。
-            //
-            // scroll { scrollBy(delta) } 走的是同一条手势管线，天然带动画、
-            // 无抖动、玻璃采样稳定。
-            onDragFraction = { fraction ->
-                if (!draggingTab) draggingTab = true
-                val currentFraction = pagerState.currentPage + pagerState.currentPageOffsetFraction
-                val deltaPages = fraction - currentFraction
-                // 转成像素增量：一页宽 = pager 自身尺寸 / 页数。
-                val pageWidthPx = pagerState.layoutInfo.pageSize
-                if (pageWidthPx > 0) {
-                    scope.launch {
-                        pagerState.scroll {
-                            // 限制单帧位移，避免猛拽时越界过大。
-                            val maxDelta = pageWidthPx.toFloat()
-                            scrollBy((deltaPages * pageWidthPx).coerceIn(-maxDelta, maxDelta))
-                        }
-                    }
-                }
-            },
-            // 松手：吸附到最近整页（这一步才带平移动画的收尾），并恢复同步。
-            onDragEnd = { fraction ->
-                val target = fraction.roundToIntSafely(pagerState.pageCount)
-                scope.launch {
-                    pagerState.animateScrollToPage(target)
-                    draggingTab = false
-                }
-            },
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(bottom = barBottomPadding),
         )
     }
-}
-
-/** 把小数索引四舍五入到合法页码范围内。 */
-private fun Float.roundToIntSafely(pageCount: Int): Int {
-    val rounded = kotlin.math.round(this).toInt()
-    return rounded.coerceIn(0, (pageCount - 1).coerceAtLeast(0))
 }
 
 /** 二级页路由分发。 */

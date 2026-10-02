@@ -80,8 +80,6 @@ import io.github.sxd91.suchat.core.design.glass.liquid.vibrancy
 import io.github.sxd91.suchat.core.design.icon.SuchatIcons
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
-import top.yukonga.miuix.kmp.basic.Icon as MiuixIcon
-import top.yukonga.miuix.kmp.basic.Text as MiuixText
 import top.yukonga.miuix.kmp.blur.Backdrop
 import top.yukonga.miuix.kmp.blur.blur
 import top.yukonga.miuix.kmp.blur.drawBackdrop
@@ -149,29 +147,8 @@ private val iosIndicatorSpecular = Highlight(
  *  - `lens(refractionHeight = 24.dp, refractionAmount = 24.dp)` 做圆角矩形 SDF 边缘折射；
  *  - 选中指示器额外走 `lens(..., depthEffect = true, chromaticAberration = 0.5f)` 出七通道色散。
  *
- * ## 用户第 5 条：划到哪里就切到哪里
- *
- * 原实现只在**松手时**（`onDragStopped`）才通知选中变化 —— 拖拽过程中
- * 内容层不动，视觉上"指示器先跑、页面后跳"，割裂。
- *
- * 现在新增 [onDragFraction] 回调：拖拽过程中**持续**回报当前的小数索引
- * （如 1.37 表示"在 1 与 2 之间偏 2"）。调用方（AppShell）据此让
- * `HorizontalPager` 实时跟随拖拽位置，做到指示器与页面内容同步移动 ——
- * 这就是"划到哪切到哪"。
- *
- * ## ★ 2026-10-02 修正：不能用 `value`，要用 `targetValue`
- *
- * `value` 是**弹簧动画的当前值**（跟随手指但有弹簧延迟），`targetValue`
- * 才是**手指直接映射的目标**。传 `value` 会让页面跟在指示器弹簧后面追，
- * 观感是"拖快了页面跟不上"。
- *
- * 同理新增 [onDragEnd]：松手时把 `targetValue` 交给调用方做**吸附动画** ——
- * 否则页面会停在半页位置。
- *
  * @param backdrop 由调用方（AppShell）通过 `rememberLayerBackdrop()` 创建，
  *   并在内容层用 `.layerBackdrop(backdrop)` 录制。
- * @param onDragFraction 拖拽过程中的实时进度（小数索引，基于 targetValue）。
- * @param onDragEnd 松手回调，参数为最终小数索引（调用方据此吸附）。
  */
 @Composable
 fun LiquidGlassTabBar(
@@ -183,8 +160,6 @@ fun LiquidGlassTabBar(
     mode: TabBarMode = TabBarMode.LiquidGlass,
     colors: LiquidGlassTabBarColors = LiquidGlassTabBarDefaults.colors(),
     liquidGlassBlurRadius: Dp = 4.dp,
-    onDragFraction: ((Float) -> Unit)? = null,
-    onDragEnd: ((Float) -> Unit)? = null,
 ) {
     if (items.isEmpty()) return
 
@@ -223,8 +198,6 @@ fun LiquidGlassTabBar(
     var currentIndex by remember { mutableIntStateOf(selectedIndex) }
     val selectedIndexUpdated by rememberUpdatedState(selectedIndex)
     val onSelectUpdated by rememberUpdatedState(onSelect)
-    val onDragFractionUpdated by rememberUpdatedState(onDragFraction)
-    val onDragEndUpdated by rememberUpdatedState(onDragEnd)
     val gestureIndices = remember { IntArray(2) }
 
     fun indexAt(positionX: Float): Int {
@@ -256,15 +229,11 @@ fun LiquidGlassTabBar(
                     currentIndex = target
                     onSelectUpdated(target)
                 }
-                // ★ 把最终小数进度交给调用方做吸附动画（否则页面停在半页）。
-                onDragEndUpdated?.invoke(targetValue)
                 updateValue(target.toFloat())
                 animationScope.launch { offsetAnimation.animateTo(0f, spring(1f, 300f, 0.5f)) }
             },
             onDragCancelled = {
                 currentIndex = gestureIndices[0]
-                // 取消也通知调用方归位（否则页面停在半页）。
-                onDragEndUpdated?.invoke(gestureIndices[0].toFloat())
                 updateValue(gestureIndices[0].toFloat())
                 animationScope.launch { offsetAnimation.animateTo(0f, spring(1f, 300f, 0.5f)) }
             },
@@ -278,13 +247,6 @@ fun LiquidGlassTabBar(
                         (targetValue + dragAmount.x / tabWidthPx * if (isLtr) 1f else -1f)
                             .fastCoerceIn(0f, (tabsCount - 1).toFloat())
                     )
-                    // ★ 用户第 5 条「划到哪切到哪」：
-                    // 把当前的小数进度实时回报给调用方，让内容层（HorizontalPager）
-                    // 跟着指示器同步移动，而不是等松手才跳。
-                    //
-                    // 用 targetValue 而非 value：value 是弹簧当前值（有延迟），
-                    // targetValue 才是手指直接映射的目标 —— 用 value 会"拖快了跟不上"。
-                    onDragFractionUpdated?.invoke(targetValue)
                     animationScope.launch {
                         offsetAnimation.snapTo(offsetAnimation.value + dragAmount.x)
                     }
@@ -354,13 +316,13 @@ fun LiquidGlassTabBar(
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 CompositionLocalProvider(LocalContentColor provides contentColor) {
-                    MiuixIcon(
-                        imageVector = if (isActive) SuchatIcons.forKey(item.iconKey)
+                    Icon(
+                        imageVector = if (isActive) SuchatIcons.forKeySelected(item.iconKey)
                         else SuchatIcons.forKey(item.iconKey),
                         contentDescription = item.label,
                         modifier = Modifier.size(22.dp),
                     )
-                    MiuixText(
+                    Text(
                         text = item.label,
                         fontSize = 11.sp,
                         lineHeight = 14.sp,
