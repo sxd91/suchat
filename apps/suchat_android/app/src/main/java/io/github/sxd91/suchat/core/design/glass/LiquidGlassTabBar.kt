@@ -34,7 +34,6 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -73,7 +72,6 @@ import androidx.compose.ui.util.fastRoundToInt
 import androidx.compose.ui.util.lerp
 import io.github.sxd91.suchat.core.design.glass.animation.DampedDragAnimation
 import io.github.sxd91.suchat.core.design.glass.animation.InteractiveHighlight
-import io.github.sxd91.suchat.core.design.glass.animation.TunableParams
 import io.github.sxd91.suchat.core.design.glass.liquid.InnerShadow
 import io.github.sxd91.suchat.core.design.glass.liquid.innerShadow
 import io.github.sxd91.suchat.core.design.glass.liquid.lens
@@ -174,29 +172,6 @@ private val iosIndicatorSpecular = Highlight(
  *   并在内容层用 `.layerBackdrop(backdrop)` 录制。
  * @param onDragFraction 拖拽过程中的实时进度（小数索引，基于 targetValue）。
  * @param onDragEnd 松手回调，参数为最终小数索引（调用方据此吸附）。
- * @param externalFractionProvider 外部驱动源（页面手势）。
- *
- * ## ★ 2026-10-02 双向联动（用户澄清的完整语义）
- *
- * 底栏与页面必须是**双向**联动，而不是单向：
- *
- *  1. **拖玻璃 → 页面跟随**（[onDragFraction] / [onDragEnd]）：
- *     手指按住玻璃拖动时，页面按玻璃的实时进度平移；玻璃回位时页面同步回位。
- *  2. **滑页面 → 玻璃跟随**（[externalFractionProvider]）：
- *     手指在内容区左右滑动时，玻璃指示器"出现"并跟随页面滑动进度移动，
- *     松手后页面吸附、玻璃同步回位。
- *
- * ## 优先级（用户明确要求）
- *
- * **优先识别是否松手（手动）→ 再识别是否切换页面**：
- * 手指按住期间（`isGestureActive`）一切以手势为准，外部同步一律让位；
- * 只有手势结束后，页面状态才允许回写玻璃。
- * 两条链路各自有自己的手势源，互不抢占。
- *
- * @param externalFractionProvider 页面手势驱动源：返回当前页面小数索引
- *   （`currentPage + currentPageOffsetFraction`）；返回 `null` 表示页面未在手势中。
- *   用 `() -> Float?` 而非直接传值，是为了让内部 `snapshotFlow` 读取状态，
- *   避免每一帧都触发调用方（MainActivity）重组。
  */
 @Composable
 fun LiquidGlassTabBar(
@@ -210,7 +185,6 @@ fun LiquidGlassTabBar(
     liquidGlassBlurRadius: Dp = 4.dp,
     onDragFraction: ((Float) -> Unit)? = null,
     onDragEnd: ((Float) -> Unit)? = null,
-    externalFractionProvider: (() -> Float?)? = null,
 ) {
     if (items.isEmpty()) return
 
@@ -251,24 +225,7 @@ fun LiquidGlassTabBar(
     val onSelectUpdated by rememberUpdatedState(onSelect)
     val onDragFractionUpdated by rememberUpdatedState(onDragFraction)
     val onDragEndUpdated by rememberUpdatedState(onDragEnd)
-    // ★ 2026-10-02：外部驱动源同样必须 rememberUpdatedState 包装。
-    //
-    // 调用方（MainActivity）传进来的 lambda 每次重组都是**新实例**（捕获了 pagerState）。
-    // 若直接把它当 LaunchedEffect 的 key，每个重组都会重启该 effect →
-    // snapshotFlow 反复重建 → 协程风暴 → 卡顿。
-    // 包装成 UpdatedState 后：effect 只启动一次，内部始终读到最新的 provider。
-    val externalFractionUpdated by rememberUpdatedState(externalFractionProvider)
     val gestureIndices = remember { IntArray(2) }
-
-    // ★ 2026-10-02：「页面手势 → 玻璃跟随」链路的活跃状态。
-    //
-    //  - [pageDragFraction]：页面手势中的当前小数索引；非 null 表示本链路活跃。
-    //    它同时作为「让位信号」——`selectedIndexUpdated` 流的同步在非 null 时跳过，
-    //    避免两条链路同时写 `valueAnimation`（双写入者冲突 → 抖动/掉帧）。
-    //  - [pagePressActive]：按压态是否已激活。press() 会启动 3 个协程，
-    //    用标志位保证一次手势只调一次（否则每帧调用 = 协程风暴）。
-    var pageDragFraction by remember { mutableStateOf<Float?>(null) }
-    var pagePressActive by remember { mutableStateOf(false) }
 
     fun indexAt(positionX: Float): Int {
         if (tabWidthPx == 0f) return currentIndex
@@ -286,24 +243,11 @@ fun LiquidGlassTabBar(
             valueRange = 0f..(tabsCount - 1).toFloat(),
             visibilityThreshold = 0.001f,
             initialScale = 1f,
-            // 热调：TunableParams.pressedScale。
-            pressedScale = TunableParams.pressedScale,
+            pressedScale = 78f / 56f,
             canDrag = { position -> position.x in 0f..totalWidthPx },
             onDragStarted = { position ->
                 gestureIndices[0] = currentIndex
                 gestureIndices[1] = indexAt(position.x)
-                // ★ 2026-10-02 修正（用户反馈「玻璃怎么一抽一抽的」）：
-                //
-                // 拖玻璃时存在**反馈环**：
-                //   手指拖玻璃 → onDragFraction 推页面 → 页面动 →
-                //   externalFractionProvider 又驱动玻璃跟随 → 与手指抢 valueAnimation。
-                //
-                // 两条写入源（手指的 updateValue / 跟随环的 snapTo）交替覆盖，
-                // 值在两侧跳变 —— 这就是"一抽一抽"。
-                //
-                // 修法：手指接手瞬间**清空跟随目标**，让循环停止拉拽玻璃；
-                // 手指完全接管（跟手优先）。
-                clearFollowTarget()
                 updateValue(gestureIndices[1].toFloat())
             },
             onDragStopped = {
@@ -334,6 +278,13 @@ fun LiquidGlassTabBar(
                         (targetValue + dragAmount.x / tabWidthPx * if (isLtr) 1f else -1f)
                             .fastCoerceIn(0f, (tabsCount - 1).toFloat())
                     )
+                    // ★ 用户第 5 条「划到哪切到哪」：
+                    // 把当前的小数进度实时回报给调用方，让内容层（HorizontalPager）
+                    // 跟着指示器同步移动，而不是等松手才跳。
+                    //
+                    // 用 targetValue 而非 value：value 是弹簧当前值（有延迟），
+                    // targetValue 才是手指直接映射的目标 —— 用 value 会"拖快了跟不上"。
+                    onDragFractionUpdated?.invoke(targetValue)
                     animationScope.launch {
                         offsetAnimation.snapTo(offsetAnimation.value + dragAmount.x)
                     }
@@ -349,88 +300,9 @@ fun LiquidGlassTabBar(
 
     LaunchedEffect(dampedDragAnimation) {
         snapshotFlow { selectedIndexUpdated }.collectLatest { index ->
-            // ★ 2026-10-02 四次修正（用户反馈「每次切换页面液态玻璃状态都要重置一次」）：
-            //
-            // ## 根因：双写入者冲突（切页场景）
-            //
-            // 切页时 `selectedIndex`（= pagerState.targetPage）会立刻变成目标页，
-            // 本链路随即 `animateToValue(index)` 启动 spring 动画；
-            // **同时** `externalFractionProvider` 也在输出（pager 正在动画移动），
-            // 那条链路用 `followValueLinearly` 写同一个 `valueAnimation`。
-            //
-            // 两条链路交替写 → spring 被反复取消重启 →
-            // 指示器跳变、玻璃按压态被打断 —— 用户看到的"状态重置"。
-            //
-            // ## 修法：单一数据源
-            //
-            // 只要外部提供了「页面进度源」（[externalFractionProvider]），
-            // 玻璃位置就**完全由它驱动** —— 它是 pager 的真实位置，
-            // 已经覆盖了「点击切页动画」与「手势滑动」两种场景。
-            // 本链路退化为**只更新逻辑索引**（高亮/语义），不再插手动画。
             if (currentIndex != index) {
                 currentIndex = index
-            }
-            if (externalFractionProvider != null) return@collectLatest
-            // 没有外部进度源时（组件被单独使用），才由本链路驱动动画。
-            if (dampedDragAnimation.isGestureActive) return@collectLatest
-            if (pageDragFraction != null) return@collectLatest
-            dampedDragAnimation.animateToValue(index.toFloat())
-        }
-    }
-
-    // ★ 2026-10-02 新增：页面手势 → 玻璃跟随（双向联动的第二向）。
-    //
-    // 用户在内容区左右滑动页面（HorizontalPager 自己处理手势）时：
-    //  - 玻璃指示器"出现"（进入按压态，玻璃特效亮起）；
-    //  - 指示器实时跟随页面的滑动进度（currentPage + offsetFraction）；
-    //  - 手指松开 → 页面吸附整页 → 指示器同步收尾（回位）。
-    //
-    // 与「拖玻璃」链路的分工：
-    //  - 拖玻璃时 `isGestureActive == true` → 本链路让位，不抢；
-    //  - 滑页面时 `isGestureActive == false` → 本链路驱动。
-    //
-    // ## ★ 2026-10-02 二次修正（用户反馈「划着一卡一卡的」）
-    //
-    // 第一版有个**双写入者冲突**：滑页面时除了本链路 snapTo 跟手，
-    // 上面的 `selectedIndexUpdated` 流也会因 pager 翻页而触发
-    // `animateToValue`（spring 动画）—— 两条链路同时写 `valueAnimation`，
-    // 互相取消重启 → 指示器抖动、掉帧（就是"一卡一卡的"）。
-    //
-    // 修法：把「本链路是否活跃」也用 `pageDragFraction` 状态登记下来，
-    // 让 `selectedIndexUpdated` 流在页面手势期间**同样让位**。
-    if (externalFractionProvider != null) {
-        // ★ key 里不再放 externalFractionProvider（每次重组都是新实例）——
-        // 只放 dampedDragAnimation，effect 生命周期与动画对象绑定。
-        LaunchedEffect(dampedDragAnimation) {
-            snapshotFlow { externalFractionUpdated?.invoke() }.collectLatest { fraction ->
-                if (fraction == null) {
-                    // 页面已停稳：清除跟随目标，交给 release() 弹簧收尾。
-                    //
-                    // ★ 2026-10-02 修正（「不丝滑」）：
-                    // 这里**只在确实处于跟随态时**才 release 一次，
-                    // 避免停稳后反复触发 release/press 抖动。
-                    if (pageDragFraction != null && !dampedDragAnimation.isGestureActive) {
-                        dampedDragAnimation.clearFollowTarget()
-                        dampedDragAnimation.release()
-                        pagePressActive = false
-                    }
-                    pageDragFraction = null
-                    return@collectLatest
-                }
-                // 拖玻璃期间本链路完全让位（优先级：手动 > 页面）。
-                if (dampedDragAnimation.isGestureActive) return@collectLatest
-
-                pageDragFraction = fraction
-
-                // 玻璃"出现"：进入按压态（玻璃特效亮起）。
-                // ★ 用标志位守卫：press() 会启动 3 个协程，
-                // 若每帧都调（pressProgress 尚未越过 0.5 时）就是协程风暴 → 卡顿。
-                if (!pagePressActive) {
-                    pagePressActive = true
-                    dampedDragAnimation.press()
-                }
-                // ★ 曲线速度（先快后慢）：指数逼近，不硬锁死。
-                dampedDragAnimation.followValueLinearly(fraction)
+                dampedDragAnimation.animateToValue(index.toFloat())
             }
         }
     }
@@ -442,37 +314,6 @@ fun LiquidGlassTabBar(
                 onSelectUpdated(index)
             }
             dampedDragAnimation.animateToValue(index.toFloat())
-        }
-    }
-
-    // ★ 2026-10-02 新增（用户反馈「滑动时页面跟随依旧不丝滑」）：
-    //
-    // ## 真因
-    //
-    // 旧实现在 `onDrag` 手势回调里把 `targetValue`（手指原始目标）报给调用方。
-    // 但 `targetValue` 是**跳变**的（手指位移直接累加），而玻璃本体走 spring
-    // 是**平滑**的 —— 两者不同源：
-    //
-    //   手指目标（跳变）→ 页面（跳变前进）
-    //   玻璃弹簧（平滑）→ 指示器（平滑前进）
-    //
-    // 于是页面与指示器各走各的，页面显得"顿、不丝滑"。
-    //
-    // ## 修法
-    //
-    // 改为**每帧汇报玻璃的真实平滑值**（`dampedDragAnimation.value`）——
-    // 页面跟着玻璃的曲线走，两者天然同源、完全同步。
-    //
-    // 只在「手指按住玻璃」期间汇报（`isGestureActive`）；
-    // 其余场景由 [externalFractionProvider] 反向驱动，两条链路互斥不打架。
-    if (onDragFraction != null) {
-        LaunchedEffect(dampedDragAnimation) {
-            while (true) {
-                androidx.compose.runtime.withFrameNanos { it }
-                if (dampedDragAnimation.isGestureActive) {
-                    onDragFractionUpdated?.invoke(dampedDragAnimation.value)
-                }
-            }
         }
     }
 

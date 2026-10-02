@@ -75,9 +75,6 @@ import kotlin.math.sign
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-import io.github.sxd91.suchat.ui.component.TuningPanel
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.foundation.gestures.detectTapGestures
 
 /**
  * Suchat Android 主 Activity。
@@ -238,8 +235,6 @@ private fun MainTabs(
     val scope = rememberCoroutineScope()
 
     val tabs = remember { SuchatTab.entries.map { TabItem(it.label, it.iconKey) } }
-    // ★ 2026-10-02：动效热调面板开关（长按底栏唤出，改参立即生效）。
-    var showTuning by remember { mutableStateOf(false) }
     val pagerState = rememberPagerState(
         initialPage = nav.currentTab.ordinal,
         pageCount = { SuchatTab.entries.size },
@@ -249,47 +244,6 @@ private fun MainTabs(
     // 否则 LaunchedEffect(nav.currentTab) 会同时 animateScrollToPage，
     // 与手指的 scroll {} 抢驱动权 —— 表现为页面抖动 + 玻璃采样错乱（"玻璃消失"）。
     var draggingTab by remember { mutableStateOf(false) }
-
-    // ★ 2026-10-02 新增：页面跟随目标（拖玻璃时驱动页面）。
-    //
-    // ## 用户要求演进
-    //
-    //  1. 「玻璃滑动时界面也要线性移动」
-    //  2. 「是曲线速度先快后慢」
-    //  3. 「玻璃怎么一抽一抽的」
-    //  4. 「滑动时页面跟随依旧不丝滑」
-    //
-    // ## ★ 最终实现：单级映射（去掉双级延迟）
-    //
-    // 之前经历两次错误：
-    //  - v1 一次 scrollBy 到位 → 页面瞬间跳（"锁死跟随"）；
-    //  - v2 页面自己也做指数逼近 → **两级延迟叠加**：
-    //        手指 → 玻璃（延迟1） → 页面（延迟2）
-    //    页面明显滞后于手指，观感"不丝滑"。
-    //
-    // 正确做法：**玻璃值本身已经是平滑曲线**（指数逼近的结果），
-    // 页面只需**即时映射**它 —— 于是页面的运动曲线 = 玻璃的曲线，
-    // 既平滑（有加速减速）又不滞后（无第二级延迟）。
-    //
-    // 所以这里回到「每帧直接 scroll 到目标」，但目标值来自玻璃的平滑输出，
-    // 因此画面是曲线的，而不是瞬移。
-    val pageTargetFraction = remember { MutableStateFlow<Float?>(null) }
-
-    // 唯一消费者：帧同步地把页面**映射**到目标（目标已是平滑值）。
-    LaunchedEffect(pagerState) {
-        while (true) {
-            // 与渲染帧严格对齐 —— 每帧只更新一次，不抖不跳。
-            androidx.compose.runtime.withFrameNanos { it }
-            val target = pageTargetFraction.value ?: continue
-            val pageWidthPx = pagerState.layoutInfo.pageSize.toFloat()
-            if (pageWidthPx <= 0f) continue
-            val current = pagerState.currentPage + pagerState.currentPageOffsetFraction
-            val diff = target - current
-            if (abs(diff) < 0.0005f) continue
-            // 直接对齐（单级映射，无额外逼近延迟）。
-            pagerState.scroll { scrollBy(diff * pageWidthPx) }
-        }
-    }
 
     // 底栏限位：胶囊 64dp + 12dp + 手势条（只抬高滚动终点，不挡内容折射）。
     val barBottomPadding = 12.dp +
@@ -348,75 +302,36 @@ private fun MainTabs(
             //    animateScrollToPage 打架，pager 高频抖动 → 底栏 backdrop 录制错乱
             //    → 玻璃看起来"自己消失变成普通 tab"。
             //
-            // ## 双向联动（用户澄清）
-            //
-            // ① 拖玻璃 → 页面跟随：[onDragFraction] 驱动 pager 逐帧跟随，
-            //    玻璃松手回位时 [onDragEnd] 让页面吸附到整页（同步回位）。
-            // ② 滑页面 → 玻璃跟随：[externalFractionProvider] 把 pager 的实时小数索引
-            //    回报给底栏，玻璃指示器随之"出现 → 跟随 → 回位"。
-            //
-            // ## ★ 2026-10-02 修正（用户反馈「玻璃滑动时界面也要线性移动」）
-            //
-            // 旧实现把玻璃位置**直接映射**成页面位移（deltaPages × pageWidth）——
-            // 页面瞬间对齐玻璃，是"锁死跟随"。
-            //
-            // 现在：onDragFraction 只**登记目标**（零协程），由上面那个常驻协程
-            // 以恒定速度把 pager 推进到目标位置 —— 页面做线性位移。
+            // scroll { scrollBy(delta) } 走的是同一条手势管线，天然带动画、
+            // 无抖动、玻璃采样稳定。
             onDragFraction = { fraction ->
                 if (!draggingTab) draggingTab = true
-                pageTargetFraction.value = fraction
+                val currentFraction = pagerState.currentPage + pagerState.currentPageOffsetFraction
+                val deltaPages = fraction - currentFraction
+                // 转成像素增量：一页宽 = pager 自身尺寸 / 页数。
+                val pageWidthPx = pagerState.layoutInfo.pageSize
+                if (pageWidthPx > 0) {
+                    scope.launch {
+                        pagerState.scroll {
+                            // 限制单帧位移，避免猛拽时越界过大。
+                            val maxDelta = pageWidthPx.toFloat()
+                            scrollBy((deltaPages * pageWidthPx).coerceIn(-maxDelta, maxDelta))
+                        }
+                    }
+                }
             },
-            // 松手：页面吸附到最近整页（带平移动画收尾），恢复导航同步。
+            // 松手：吸附到最近整页（这一步才带平移动画的收尾），并恢复同步。
             onDragEnd = { fraction ->
                 val target = fraction.roundToIntSafely(pagerState.pageCount)
-                // 停止跟随（交给下面的吸附动画收尾）。
-                pageTargetFraction.value = null
                 scope.launch {
                     pagerState.animateScrollToPage(target)
                     draggingTab = false
                 }
             },
-            // ② 页面 → 玻璃：把 pager 的实时小数索引回报给底栏。
-            //
-            // ## ★ 2026-10-02 修正（用户反馈「滑动时页面跟随依旧不丝滑」+「玻璃状态重置」）
-            //
-            // 旧判定 `offset == 0f && currentPage == targetPage` 有两个问题：
-            //  1. **浮点精确比较**：pager 动画收尾时 offsetFraction 是极小的
-            //     非零浮点（如 1e-7），`== 0f` 永不成立 → 长时间返回数值 →
-            //     玻璃一直处于"跟随中"却在几乎不动 → 观感卡顿；
-            //  2. **停稳瞬间硬切 null**：从"有值"到 null 是突变，
-            //     玻璃位置从跟随值直接跳到 release 收尾 → 不丝滑。
-            //
-            // 修法：
-            //  - 用**阈值**（0.001）判定停稳，而非精确相等；
-            //  - 停稳后仍返回**当前真实索引**（整数页），让玻璃平滑收敛到整数位，
-            //    而不是突然切 null；只有真正静止时才交还控制权。
-            externalFractionProvider = externalProvider@{
-                // 拖玻璃期间完全让位（手指独占，防反馈环）。
-                if (draggingTab) return@externalProvider null
-                val page = pagerState.currentPage
-                val offset = pagerState.currentPageOffsetFraction
-                // 阈值判定：避免浮点残差导致"永远在跟随"。
-                if (abs(offset) < 0.001f) return@externalProvider null
-                page + offset
-            },
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = barBottomPadding)
-                // ★ 2026-10-02：长按底栏（不拖动）→ 唤出动效热调面板。
-                // 用 onLongPress 而非 combinedClickable：不与底栏自身的
-                // 拖拽/点击手势冲突（长按判定由 pointerInput 独立完成）。
-                .pointerInput(Unit) {
-                    detectTapGestures(
-                        onLongPress = { showTuning = true },
-                    )
-                },
+                .padding(bottom = barBottomPadding),
         )
-    }
-
-    // ★ 2026-10-02：动效热调面板（改参立即生效，无需重编译）。
-    if (showTuning) {
-        TuningPanel(onDismiss = { showTuning = false })
     }
 }
 

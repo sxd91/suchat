@@ -48,7 +48,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import io.github.sxd91.suchat.core.design.glass.animation.TunableParams
 import io.github.sxd91.suchat.core.design.icon.SuchatIcons
 import kotlinx.coroutines.launch
 import java.time.LocalDateTime
@@ -141,8 +140,8 @@ fun WeKitDrawer(
         }
     }
 
-    // WeKit：抽屉宽 = 屏宽 × 0.84（热调：TunableParams.drawerWidthFraction）。
-    val drawerWidthPx = screenWidthPx * TunableParams.drawerWidthFraction
+    // WeKit：抽屉宽 = 屏宽 × 0.84。
+    val drawerWidthPx = screenWidthPx * 0.84f
     val drawerWidthDp = with(density) { drawerWidthPx.toDp() }
 
     /** WeKit 的减速插值：`1 - (1-t)^1.4`（对应 DecelerateInterpolator(1.4f)）。 */
@@ -158,9 +157,7 @@ fun WeKitDrawer(
             return@LaunchedEffect
         }
         // WeKit：duration = 120 + 120·|from-target|（ms）。
-        // 热调：TunableParams.drawerAnimBaseMs / drawerAnimExtraMs。
-        val duration = (TunableParams.drawerAnimBaseMs +
-            TunableParams.drawerAnimExtraMs * abs(target - from)).toInt()
+        val duration = (120 + 120 * abs(target - from)).toInt()
         progress.animateTo(target, tween(duration, easing = decelerate))
     }
 
