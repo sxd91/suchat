@@ -8,6 +8,28 @@
   <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
   <uses-permission android:name="android.permission.CAMERA"/>
   <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+
+  <!--
+    ★ 2026-10-02（Android Lint 抓到）：权限必须声明「对应硬件非必需」。
+
+    问题：
+      <uses-permission android:name="...CAMERA"/> 单独声明时，
+      Android 会**假定摄像头是必需的** —— 不支持摄像头的设备
+      （部分平板、ChromeOS、Android TV）将**无法安装**本应用。
+      Lint 报：PermissionImpliesUnsupportedChromeOsHardware。
+
+    修法：
+      CAMERA 与 RECORD_AUDIO 都是「可选功能」的依赖：
+        · 相机 —— 扫一扫、拍摄、视频通话
+        · 麦克风 —— 语音消息、语音输入、音视频通话
+      这些功能缺失时应用仍可用，因此硬件必须声明 `required="false"`。
+      这样 Google Play 只会在**具备该硬件的设备**上展示对应功能，
+      不具备的设备照样能安装并正常使用其它功能。
+  -->
+  <uses-feature android:name="android.hardware.camera" android:required="false"/>
+  <uses-feature android:name="android.hardware.camera.autofocus" android:required="false"/>
+  <uses-feature android:name="android.hardware.microphone" android:required="false"/>
+
   <application android:theme="@style/Theme.Suchat" android:label="Suchat" android:enableOnBackInvokedCallback="true">
     <activity android:name=".MainActivity" android:exported="true">
       <intent-filter>
