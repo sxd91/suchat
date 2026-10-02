@@ -75,6 +75,9 @@ import kotlin.math.sign
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import io.github.sxd91.suchat.ui.component.TuningPanel
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
 
 /**
  * Suchat Android 主 Activity。
@@ -235,6 +238,8 @@ private fun MainTabs(
     val scope = rememberCoroutineScope()
 
     val tabs = remember { SuchatTab.entries.map { TabItem(it.label, it.iconKey) } }
+    // ★ 2026-10-02：动效热调面板开关（长按底栏唤出，改参立即生效）。
+    var showTuning by remember { mutableStateOf(false) }
     val pagerState = rememberPagerState(
         initialPage = nav.currentTab.ordinal,
         pageCount = { SuchatTab.entries.size },
@@ -245,44 +250,54 @@ private fun MainTabs(
     // 与手指的 scroll {} 抢驱动权 —— 表现为页面抖动 + 玻璃采样错乱（"玻璃消失"）。
     var draggingTab by remember { mutableStateOf(false) }
 
-    // ★ 2026-10-02 新增：页面线性跟随目标（拖玻璃时驱动页面）。
+    // ★ 2026-10-02 新增：页面跟随目标（拖玻璃时驱动页面）。
     //
-    // ## 用户要求
+    // ## 用户要求演进
     //
-    // > 「玻璃滑动时界面也要线性移动」
+    //  1. 「玻璃滑动时界面也要线性移动」
+    //  2. 「是曲线速度先快后慢」
+    //  3. 「玻璃怎么一抽一抽的」
     //
-    // 旧实现把玻璃位置**直接映射**成页面位移（`scrollBy(deltaPages * pageWidth)`）——
-    // 页面瞬间对齐玻璃，是"锁死跟随"，生硬无速度感。
+    // ## 最终实现：帧同步 + 指数逼近（与玻璃侧完全一致）
     //
-    // 现在改为**恒定速度逼近**（与玻璃跟随页面那一侧对称）：
-    // 页面以固定速度追向玻璃目标位置，观感是一条平滑的线性位移。
+    // 旧实现把玻璃位置**直接映射**成页面位移（一次 scrollBy 到位）——
+    // 页面瞬间对齐玻璃，是"锁死跟随"。
+    // 中间版本用固定步长逼近，会在目标两侧过冲回退 → "一抽一抽"。
+    //
+    // 现在：**帧同步**（withFrameNanos）+ **指数逼近**
+    // `value += diff * (1 - exp(-dt/tau))` ——
+    // 距离大时快、接近时自然放慢（先快后慢），数学上永不过冲。
     val pageTargetFraction = remember { MutableStateFlow<Float?>(null) }
 
-    // 唯一消费者：把最新目标小数索引**线性**推进到 pager（恒速，非瞬移）。
+    // 唯一消费者：帧同步 + 指数逼近地把页面推进到目标小数索引。
     LaunchedEffect(pagerState) {
-        // 恒定速度：每秒跨越的页数（≈167ms/页，与玻璃侧一致）。
-        val pagesPerSecond = 6f
-        val frameMs = 8L
-        val step = pagesPerSecond * (frameMs / 1000f)
+        // 时间常数（秒）：越小越快。与玻璃侧同值，保证两侧同步。
+        val tauSeconds = 0.06f
+        var lastFrameNs = 0L
         while (true) {
+            val frameNs = androidx.compose.runtime.withFrameNanos { it }
             val target = pageTargetFraction.value
             if (target == null) {
-                delay(frameMs)
+                lastFrameNs = frameNs
                 continue
             }
+            val dtSeconds = if (lastFrameNs == 0L) {
+                0.016f
+            } else {
+                ((frameNs - lastFrameNs) / 1_000_000_000.0).toFloat().coerceIn(0.001f, 0.05f)
+            }
+            lastFrameNs = frameNs
+
             val pageWidthPx = pagerState.layoutInfo.pageSize.toFloat()
-            if (pageWidthPx <= 0f) {
-                delay(frameMs)
-                continue
-            }
+            if (pageWidthPx <= 0f) continue
+
             val current = pagerState.currentPage + pagerState.currentPageOffsetFraction
             val diff = target - current
-            // 差值小于一步 → 直接对齐（消除锯齿）；否则按恒定步长推进。
-            val advance = if (abs(diff) <= step) diff else step * diff.sign
-            if (advance != 0f) {
-                pagerState.scroll { scrollBy(advance * pageWidthPx) }
-            }
-            delay(frameMs)
+            if (abs(diff) < 0.0005f) continue
+
+            // 指数逼近（先快后慢、无过冲）。
+            val alpha = 1f - kotlin.math.exp(-dtSeconds / tauSeconds)
+            pagerState.scroll { scrollBy(diff * alpha * pageWidthPx) }
         }
     }
 
@@ -364,7 +379,7 @@ private fun MainTabs(
             // 松手：页面吸附到最近整页（带平移动画收尾），恢复导航同步。
             onDragEnd = { fraction ->
                 val target = fraction.roundToIntSafely(pagerState.pageCount)
-                // 停止线性跟随（交给下面的吸附动画收尾）。
+                // 停止跟随（交给下面的吸附动画收尾）。
                 pageTargetFraction.value = null
                 scope.launch {
                     pagerState.animateScrollToPage(target)
@@ -374,17 +389,33 @@ private fun MainTabs(
             // ② 页面 → 玻璃：把 pager 的实时小数索引（含拖拽中的 offsetFraction）
             //    回报给底栏。返回 null 表示页面未在手势中（玻璃应回位）。
             //
-            // 判定「页面手势中」：offsetFraction 非零（正在被拖动或动画中）。
-            // 归零且 currentPage == targetPage 时视为停稳 → 返回 null 让玻璃收尾。
-            externalFractionProvider = {
+            // ★ 2026-10-02 修正（用户反馈「玻璃怎么一抽一抽的」）：
+            // 拖玻璃期间必须返回 null —— 否则形成反馈环：
+            //   手指推页面 → 页面 offsetFraction 变化 → 又驱动玻璃跟随 → 抢手指的值。
+            // 手指按住时玻璃由手指独占（跟手优先），本链路让位。
+            externalFractionProvider = externalProvider@{
+                if (draggingTab) return@externalProvider null
                 val offset = pagerState.currentPageOffsetFraction
                 val settled = offset == 0f && pagerState.currentPage == pagerState.targetPage
                 if (settled) null else pagerState.currentPage + offset
             },
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = barBottomPadding),
+                .padding(bottom = barBottomPadding)
+                // ★ 2026-10-02：长按底栏（不拖动）→ 唤出动效热调面板。
+                // 用 onLongPress 而非 combinedClickable：不与底栏自身的
+                // 拖拽/点击手势冲突（长按判定由 pointerInput 独立完成）。
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onLongPress = { showTuning = true },
+                    )
+                },
         )
+    }
+
+    // ★ 2026-10-02：动效热调面板（改参立即生效，无需重编译）。
+    if (showTuning) {
+        TuningPanel(onDismiss = { showTuning = false })
     }
 }
 

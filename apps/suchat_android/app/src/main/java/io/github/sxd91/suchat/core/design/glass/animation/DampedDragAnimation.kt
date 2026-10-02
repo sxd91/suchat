@@ -44,16 +44,20 @@ class DampedDragAnimation(
     val onLongPress: DampedDragAnimation.() -> Boolean = { false },
 ) {
 
-    private val valueAnimationSpec =
-        spring(1f, 1000f, visibilityThreshold)
-    private val velocityAnimationSpec =
-        spring(0.5f, 300f, visibilityThreshold * 10f)
-    private val pressProgressAnimationSpec =
-        spring(1f, 1000f, 0.001f)
-    private val scaleXAnimationSpec =
-        spring(0.6f, 250f, 0.001f)
-    private val scaleYAnimationSpec =
-        spring(0.7f, 250f, 0.001f)
+    private val valueAnimationSpec
+        get() = spring<Float>(
+            dampingRatio = TunableParams.valueDampingRatio,
+            stiffness = TunableParams.valueStiffness,
+            visibilityThreshold = visibilityThreshold,
+        )
+    private val velocityAnimationSpec
+        get() = spring<Float>(0.5f, 300f, visibilityThreshold * 10f)
+    private val pressProgressAnimationSpec
+        get() = spring<Float>(1f, 1000f, 0.001f)
+    private val scaleXAnimationSpec
+        get() = spring<Float>(0.6f, 250f, 0.001f)
+    private val scaleYAnimationSpec
+        get() = spring<Float>(0.7f, 250f, 0.001f)
 
     private val valueAnimation =
         Animatable(initialValue, visibilityThreshold)
@@ -88,64 +92,96 @@ class DampedDragAnimation(
     )
 
     /**
-     * 线性跟随目标（**页面手势**专用）。null = 无跟随。
+     * 跟随目标（**页面手势**专用）。null = 无跟随。
      *
-     * ## ★ 2026-10-02 新增（用户反馈）
+     * ## ★ 2026-10-02 三次修正（用户反馈）
      *
-     * > 「页面滑动做成线性速度，不然直接锁死跟随看起来不好看」
+     * 用户原话：
+     *  1. 「页面滑动做成线性速度，不然直接锁死跟随看起来不好看」
+     *  2. 「是曲线速度先快后慢」
+     *  3. 「玻璃怎么一抽一抽的」
      *
-     * 旧实现用 [snapToValue] 把玻璃**瞬间对齐**页面进度 ——
-     * 值每帧被硬写成页面值，视觉上是「锁死跟随」，生硬、没有速度感。
+     * ### 为什么"一抽一抽"
      *
-     * 现在改为**匀速逼近**：玻璃以恒定速度（[followSpeedPerSecond] 页/秒）
-     * 追向目标，跨页用固定时长，观感是平滑的线性跟随。
+     * 第二版用**固定步长**逼近：`value += step * sign(diff)`。
+     * 当 |diff| 接近 step 时，值会在目标两侧**反复过冲-回退**
+     * （当前值跳到目标左边 → 下一步又跳到右边 → 来回抖），
+     * 视觉上就是"一抽一抽"。且 `delay(8ms)` 与屏幕刷新率
+     * （60Hz=16.7ms / 120Hz=8.3ms）不同步，采样点漂移加剧抖动。
      *
-     * ## 两种跟随的语义区分（勿混）
+     * ### 正确做法：帧同步 + 指数逼近
      *
-     *  - **手指按住玻璃拖动** → 直接控制，必须**即时**跟手（[dragValueChannel]）；
-     *  - **手指滑动页面** → 间接驱动，玻璃**匀速追**（本字段）。
+     *  - **帧同步**（[withFrameNanos]）：每次回调与渲染帧严格对齐，
+     *    不会有多余/缺失的更新点；
+     *  - **指数逼近**：`value += diff * (1 - exp(-dt/tau))`，
+     *    速度与距离成正比 —— 距离大时快、接近时自然放慢（**先快后慢**），
+     *    且数学上**永不过冲**（每步都朝目标方向、步长单调收缩）。
+     *
+     * 这就是临界阻尼的观感：起步有速度感，收尾柔和无抖动。
      */
     private val followTarget = kotlinx.coroutines.flow.MutableStateFlow<Float?>(null)
 
-    /** 线性跟随速度：每秒跨越的页数（≈167ms 跨一页）。 */
-    private val followSpeedPerSecond = 6f
+    /**
+     * 跟随时间常数（秒）。越小越快。
+     *
+     * 语义：距离衰减到 1/e ≈ 37% 所需的秒数。
+     * 0.06s 时，一页距离约 150ms 内走完 90% —— 有速度感又不拖沓。
+     *
+     * ★ 热调：改为可变（[TunableParams] 运行时改，无需重编译）。
+     */
+    private var followTauSeconds: Float
+        get() = TunableParams.followTauSeconds
+        set(value) {
+            TunableParams.followTauSeconds = value
+        }
 
     init {
-        // 唯一的消费协程：串行把跟手值写进动画值。
+        // 唯一的消费协程：串行把跟手值写进动画值（手指拖动 = 即时跟手）。
         animationScope.launch {
             for (value in dragValueChannel) {
                 valueAnimation.snapTo(value)
             }
         }
-        // ★ 线性跟随协程：以恒定速度逼近 followTarget（页面手势驱动）。
-        // 单协程 + 定步长 → 匀速、无竞争、无每帧协程分配。
+        // ★ 跟随协程：帧同步 + 指数逼近（先快后慢、无过冲、无抖动）。
         animationScope.launch {
-            val frameMs = 8L
-            val step = followSpeedPerSecond * (frameMs / 1000f)
+            var lastFrameNs = 0L
             while (true) {
+                // withFrameNanos 挂起直到下一帧 —— 与渲染节拍严格对齐。
+                val frameNs = androidx.compose.runtime.withFrameNanos { it }
                 val target = followTarget.value
                 if (target == null) {
-                    delay(frameMs)
+                    lastFrameNs = frameNs
                     continue
                 }
+                // dt：本帧与上帧的间隔（秒）。首帧按 16ms 估。
+                val dtSeconds = if (lastFrameNs == 0L) {
+                    0.016f
+                } else {
+                    ((frameNs - lastFrameNs) / 1_000_000_000.0).toFloat().coerceIn(0.001f, 0.05f)
+                }
+                lastFrameNs = frameNs
+
                 val current = valueAnimation.value
                 val diff = target - current
-                if (abs(diff) <= step) {
+                if (abs(diff) < 0.0005f) {
+                    // 足够接近：直接对齐（消除亚像素级残差）。
                     valueAnimation.snapTo(target)
-                } else {
-                    valueAnimation.snapTo(current + step * diff.sign)
+                    continue
                 }
-                delay(frameMs)
+                // 指数逼近系数：1 - e^(-dt/tau)。
+                // 距离越大步长越大（先快），距离越小步长越小（后慢），永不过冲。
+                val alpha = 1f - kotlin.math.exp(-dtSeconds / followTauSeconds)
+                valueAnimation.snapTo(current + diff * alpha)
             }
         }
     }
 
-    /** 页面手势驱动：设置线性跟随目标（玻璃匀速追向它）。 */
+    /** 页面手势驱动：设置跟随目标（玻璃以曲线速度追向它）。 */
     fun followValueLinearly(value: Float) {
         followTarget.value = value.coerceIn(valueRange)
     }
 
-    /** 清除线性跟随目标（页面手势结束，交给 [release] 的弹簧收尾）。 */
+    /** 清除跟随目标（页面手势结束，交给 [release] 的弹簧收尾）。 */
     fun clearFollowTarget() {
         followTarget.value = null
     }

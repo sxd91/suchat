@@ -73,6 +73,7 @@ import androidx.compose.ui.util.fastRoundToInt
 import androidx.compose.ui.util.lerp
 import io.github.sxd91.suchat.core.design.glass.animation.DampedDragAnimation
 import io.github.sxd91.suchat.core.design.glass.animation.InteractiveHighlight
+import io.github.sxd91.suchat.core.design.glass.animation.TunableParams
 import io.github.sxd91.suchat.core.design.glass.liquid.InnerShadow
 import io.github.sxd91.suchat.core.design.glass.liquid.innerShadow
 import io.github.sxd91.suchat.core.design.glass.liquid.lens
@@ -285,11 +286,24 @@ fun LiquidGlassTabBar(
             valueRange = 0f..(tabsCount - 1).toFloat(),
             visibilityThreshold = 0.001f,
             initialScale = 1f,
-            pressedScale = 78f / 56f,
+            // 热调：TunableParams.pressedScale。
+            pressedScale = TunableParams.pressedScale,
             canDrag = { position -> position.x in 0f..totalWidthPx },
             onDragStarted = { position ->
                 gestureIndices[0] = currentIndex
                 gestureIndices[1] = indexAt(position.x)
+                // ★ 2026-10-02 修正（用户反馈「玻璃怎么一抽一抽的」）：
+                //
+                // 拖玻璃时存在**反馈环**：
+                //   手指拖玻璃 → onDragFraction 推页面 → 页面动 →
+                //   externalFractionProvider 又驱动玻璃跟随 → 与手指抢 valueAnimation。
+                //
+                // 两条写入源（手指的 updateValue / 跟随环的 snapTo）交替覆盖，
+                // 值在两侧跳变 —— 这就是"一抽一抽"。
+                //
+                // 修法：手指接手瞬间**清空跟随目标**，让循环停止拉拽玻璃；
+                // 手指完全接管（跟手优先）。
+                clearFollowTarget()
                 updateValue(gestureIndices[1].toFloat())
             },
             onDragStopped = {
