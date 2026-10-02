@@ -8,7 +8,6 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -345,7 +344,32 @@ fun LiquidGlassTabBarKyant(
         }
     }
 
-    BoxWithConstraints(
+    // ★ 这里必须是普通 `Box`，**不能**用 `BoxWithConstraints`。
+    //
+    // ## 崩溃复盘（2026-10-02 真机闪退，用户报告「点击进入预览后闪退」）
+    //
+    // 崩因：
+    // ```
+    // java.lang.IllegalStateException: Asking for intrinsic measurements of
+    // SubcomposeLayout layouts is not supported. This includes components that
+    // are built on top of SubcomposeLayout, such as lazy lists, BoxWithConstraints,
+    // TabRow, etc.
+    //   at IntrinsicWidthNode.calculateContentConstraints(Intrinsic.kt:182)
+    //   at IntrinsicSizeModifier.measure(Intrinsic.kt:281)
+    // ```
+    //
+    // 我上一版把两处写法**混用**了：
+    //  · `BoxWithConstraints`（抄自 Kyant 的 `LiquidBottomTabs.kt`）
+    //  · `.width(IntrinsicSize.Min)`（旧版 miuix 实现留下的）
+    //
+    // `BoxWithConstraints` 内部是 **`SubcomposeLayout`**，而 `IntrinsicSize.Min`
+    // 要求父节点先做 **intrinsic 测量** —— SubcomposeLayout 不支持，直接抛异常。
+    // 旧版没事是因为它用的是普通 `Box`（普通布局支持 intrinsic）。
+    //
+    // 而且 `BoxWithConstraints` 的 `constraints` 本文件**一次都没用到** ——
+    // 纯粹是照抄示例时的冗余。改用普通 `Box` 后，`IntrinsicSize.Min` 也能正常工作，
+    // 且少一层 subcompose，测量更快。
+    Box(
         modifier.width(androidx.compose.foundation.layout.IntrinsicSize.Min),
         contentAlignment = Alignment.CenterStart,
     ) {
