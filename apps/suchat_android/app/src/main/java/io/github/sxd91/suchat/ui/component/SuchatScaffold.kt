@@ -14,7 +14,6 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -22,7 +21,6 @@ import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.sxd91.suchat.core.design.icon.SuchatIcons
-import io.github.sxd91.suchat.core.design.glass.kyant.LocalKyantBackdrop
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.SmallTopAppBar
@@ -35,10 +33,6 @@ import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.blur.progressiveTextureBlur
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-// ★ 2026-10-02 Kyant 采样层（供液态玻璃控件折射）—— 与 miuix 的 layerBackdrop 同名，
-//   用别名区分：miuix 的给顶栏渐变模糊用，Kyant 的给控件（Toggle/Slider/Button）用。
-import com.kyant.backdrop.backdrops.layerBackdrop as kyantLayerBackdrop
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop as rememberKyantLayerBackdrop
 
 /**
  * Suchat 模糊顶栏脚手架 —— 对齐「逆向系老挂」同款实现。
@@ -109,18 +103,24 @@ fun SuchatScaffold(
         drawRect(surfaceColor)
         drawContent()
     }
-    // ★ 2026-10-02 新增：Kyant 采样层（供液态玻璃控件折射）。
-    //   与上面 miuix 的 backdrop 是**两套不兼容的类型**，需各记录一份；
-    //   `remember(surfaceColor)` 包住 lambda：避免每次重组产生新 lambda 身份
-    //   → rememberLayerBackdrop 的 key 变化 → 整层重建（性能坑）。
-    val kyantBackdrop = rememberKyantLayerBackdrop(
-        onDraw = remember(surfaceColor) {
-            {
-                drawRect(surfaceColor)
-                drawContent()
-            }
-        },
-    )
+    // ★ 2026-10-02 事故复盘（删除 Kyant 采样层）：
+    //
+    // 曾在此处给「内容层」加 `rememberKyantLayerBackdrop` 并 provide 给子树，
+    // 结果**真机 native crash（RenderThread 栈溢出）**：
+    // ```
+    // signal 11 (SIGSEGV) ... likely due to stack overflow
+    // RenderNode::prepareTreeImpl → prepareListAndChildren → prepareTreeImpl → …512 帧
+    // ```
+    // 真因：RenderNode 树成环 —— 内容层被记录成 layer，而内容里的玻璃控件
+    // （LiquidToggle）绘制时又去引用这个 layer → layer 包含"引用它的节点"，
+    // prepareTreeImpl 递归无终止。
+    // 上游 demo 无此问题：它的玻璃控件与采样层是**兄弟**（Image 的记录层），
+    // 不是"被记录层"的子节点。
+    //
+    // 因此：**永远不要把"包含玻璃控件自身"的容器记录成 layer**。
+    // 控件侧由 [LocalKyantBackdrop] 为 null 时自动回退纯色 canvas 采样
+    // （对开关/滑块这类"面板上的元件"，这也正是 iOS 的设计语义：
+    //   折射面板色，而非穿透面板看内容）。
 
     androidx.compose.material3.Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -137,18 +137,13 @@ fun SuchatScaffold(
         CompositionLocalProvider(
             LocalTopBarInset provides topBarInset,
             LocalScrollBottomLimit provides LocalBottomBarInset.current,
-            // ★ 2026-10-02：Kyant 采样源下发给页面内所有液态玻璃控件
-            //   （LiquidToggle / LiquidSlider / LiquidGlassButton 从此读，
-            //   调用点无需逐个传 backdrop 参数）。
-            LocalKyantBackdrop provides kyantBackdrop,
         ) {
             Box(
                 Modifier
                     .fillMaxSize()
                     // 内容层被记录进 backdrop，供顶栏采样做渐变模糊。
-                    .layerBackdrop(backdrop)
-                    // 同一内容层再记录进 Kyant layer（两套库类型不兼容，各记一份）。
-                    .kyantLayerBackdrop(kyantBackdrop),
+                    // （注意：**只有 miuix 这一层**，Kyant 层已在上面事故复盘中移除。）
+                    .layerBackdrop(backdrop),
             ) {
                 content(
                     PaddingValues(
