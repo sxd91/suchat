@@ -203,6 +203,37 @@ private fun ChoiceRow(
     }
 }
 
+/**
+ * 从「值 to 文案」列表里安全取文案。
+ *
+ * ## 为什么不能用 `first {}`（★ 2026-10-02 闪退真因）
+ *
+ * 崩溃日志：
+ * ```
+ * java.util.NoSuchElementException: Collection contains no element matching the predicate.
+ *   at SettingsScreensKt.AppearanceScreen$lambda$9$0$0$1(SettingsScreens.kt:3917)
+ * ```
+ *
+ * 场景：**用户升级 App 后，SharedPreferences 里还留着旧版本的选项值**。
+ * 例如 `ChoiceKey.Transition` 旧默认是 `"Shared Element"`，
+ * 而新候选项只有 `Miuix / AOSP / Fade` ——
+ * `options.first { it.first == oldValue }` 直接抛 `NoSuchElementException`，
+ * 用户一打开外观页就闪退。
+ *
+ * 教训：**凡是「持久化值 → 候选项」的映射，都必须容忍脏值**。
+ * 用 [firstOrNull] + 回退到首项/默认项，让界面永远能渲染出来。
+ */
+private fun List<Pair<String, String>>.labelOf(value: String): String =
+    firstOrNull { it.first == value }?.second ?: firstOrNull()?.second ?: value
+
+/**
+ * 把持久化值规整到候选项集合内。
+ *
+ * 用于「界面显示」与「回写」：拿到脏值时给出一个合法值，避免它一直在库里躺着。
+ */
+private fun List<Pair<String, String>>.normalize(value: String): String =
+    firstOrNull { it.first == value }?.first ?: firstOrNull()?.second ?: value
+
 /** 分组灰缝（微信的 8dp）。 */
 @Composable
 private fun GroupGap(height: Dp = 8.dp) {
@@ -1060,7 +1091,7 @@ fun AppearanceScreen(
                 Column(Modifier.background(c.surface)) {
                     ChoiceRow(
                         title = "颜色来源",
-                        value = colorSourceOptions.first { it.first == curColorSource }.second,
+                        value = colorSourceOptions.labelOf(curColorSource),
                         summary = when (curColorSource) {
                             "Custom" -> "使用下方自选的颜色生成整套配色"
                             else -> "整套配色随壁纸/系统变化"
@@ -1069,7 +1100,7 @@ fun AppearanceScreen(
                     )
                     ChoiceRow(
                         title = "调色风格",
-                        value = paletteOptions.first { it.first == curPalette }.second,
+                        value = paletteOptions.labelOf(curPalette),
                         summary = "同一种子色可以调出不同气质",
                         onClick = { pickerKey = "palette" },
                     )
@@ -1122,12 +1153,12 @@ fun AppearanceScreen(
                 Column(Modifier.background(c.surface)) {
                     ChoiceRow(
                         title = "深浅色",
-                        value = themeOptions.first { it.first == settings.choice(ChoiceKey.ThemeMode) }.second,
+                        value = themeOptions.labelOf(settings.choice(ChoiceKey.ThemeMode)),
                         onClick = { pickerKey = "theme_mode" },
                     )
                     ChoiceRow(
                         title = "页面转场",
-                        value = transitionOptions.first { it.first == settings.choice(ChoiceKey.Transition) }.second,
+                        value = transitionOptions.labelOf(settings.choice(ChoiceKey.Transition)),
                         summary = "二级/三级页面进入与返回的动画风格",
                         onClick = { pickerKey = "transition" },
                         showDivider = false,
@@ -1141,12 +1172,12 @@ fun AppearanceScreen(
                 Column(Modifier.background(c.surface)) {
                     ChoiceRow(
                         title = "玻璃渲染",
-                        value = glassOptions.first { it.first == settings.choice(ChoiceKey.GlassMode) }.second,
+                        value = glassOptions.labelOf(settings.choice(ChoiceKey.GlassMode)),
                         onClick = { pickerKey = "glass_mode" },
                     )
                     ChoiceRow(
                         title = "性能档位",
-                        value = perfOptions.first { it.first == settings.choice(ChoiceKey.Performance) }.second,
+                        value = perfOptions.labelOf(settings.choice(ChoiceKey.Performance)),
                         onClick = { pickerKey = "performance" },
                         showDivider = false,
                     )
@@ -1469,7 +1500,9 @@ fun FontSizeScreen(nav: SuchatNavigator, bottomInset: Dp = 0.dp) {
                     MiuixText("预览", fontSize = 12.sp, color = c.onSurfaceVariantSummary)
                     Spacer(Modifier.height(10.dp))
                     // 预览文字随当前档位实时变化（改一下立刻看到大小）。
-                    val size = options.first { it.first == current }.second
+                    // 同样必须容忍脏值（旧版本的档位名可能在库里）——用 firstOrNull 回退。
+                    val size = options.firstOrNull { it.first == current }?.second
+                        ?: options.first().second
                     MiuixText(
                         "这是一段示例文字，用于预览当前字体大小在实际聊天中的效果。",
                         fontSize = size,

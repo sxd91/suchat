@@ -344,33 +344,29 @@ fun LiquidGlassTabBarKyant(
         }
     }
 
-    // ★ 这里必须是普通 `Box`，**不能**用 `BoxWithConstraints`。
+    // ★★ 2026-10-02 修正（用户反馈「底栏外观长度有问题」）★★
     //
-    // ## 崩溃复盘（2026-10-02 真机闪退，用户报告「点击进入预览后闪退」）
+    // ## 我上一版用错了宽度策略
     //
-    // 崩因：
-    // ```
-    // java.lang.IllegalStateException: Asking for intrinsic measurements of
-    // SubcomposeLayout layouts is not supported. This includes components that
-    // are built on top of SubcomposeLayout, such as lazy lists, BoxWithConstraints,
-    // TabRow, etc.
-    //   at IntrinsicWidthNode.calculateContentConstraints(Intrinsic.kt:182)
-    //   at IntrinsicSizeModifier.measure(Intrinsic.kt:281)
-    // ```
+    // 上一版：`Box(modifier.width(IntrinsicSize.Min))`
+    // —— 这会让底栏宽度 = **所有 tab 的 intrinsic 最小宽度之和**。
+    // 而每个 tab 里是「图标 22dp + 文字」，intrinsic 宽度随**文案长短浮动**
+    // （「消息」2 字 vs 「联系人」3 字），导致：
+    //  1. 底栏宽度不确定，四个 tab 的分配比例也随文案变化；
+    //  2. 与 Kyant 原版（`BoxWithConstraints` + 明确的外部宽度）行为不一致。
     //
-    // 我上一版把两处写法**混用**了：
-    //  · `BoxWithConstraints`（抄自 Kyant 的 `LiquidBottomTabs.kt`）
-    //  · `.width(IntrinsicSize.Min)`（旧版 miuix 实现留下的）
+    // ## 现在的策略：**固定每 tab 宽度**
     //
-    // `BoxWithConstraints` 内部是 **`SubcomposeLayout`**，而 `IntrinsicSize.Min`
-    // 要求父节点先做 **intrinsic 测量** —— SubcomposeLayout 不支持，直接抛异常。
-    // 旧版没事是因为它用的是普通 `Box`（普通布局支持 intrinsic）。
+    // 给底栏一个确定宽度：`每个 tab = 76dp`（与 Kyant 的 `defaultMinSize(76.dp)`
+    // 一致）× 4 + 内边距 8dp。四个 tab 的 `weight(1f)` 在确定宽度下均分，
+    // 底栏长度**完全稳定**，不再随文案/字体变化。
     //
-    // 而且 `BoxWithConstraints` 的 `constraints` 本文件**一次都没用到** ——
-    // 纯粹是照抄示例时的冗余。改用普通 `Box` 后，`IntrinsicSize.Min` 也能正常工作，
-    // 且少一层 subcompose，测量更快。
+    // 为什么不用 `fillMaxWidth`：那会让底栏占满整屏（微信/苹果都是**悬浮胶囊**，
+    // 不应贴边），与 HIG「floating above content」不符。
+    val barWidth = (KYANT_TAB_MIN_WIDTH * items.size) + 8.dp
+
     Box(
-        modifier.width(androidx.compose.foundation.layout.IntrinsicSize.Min),
+        modifier.width(barWidth),
         contentAlignment = Alignment.CenterStart,
     ) {
         // 底栏主体：Kyant 官方范式 —— vibrancy + blur + lens，顺序固定。
@@ -530,6 +526,14 @@ private val LocalKyantTabContentColor = staticCompositionLocalOf { Color.Unspeci
 
 /** 按压缩放提供者。 */
 private val LocalKyantTabScale = staticCompositionLocalOf { { 1f } }
+
+/**
+ * 每个 tab 的目标宽度（对齐 Kyant 示例的 `defaultMinSize(76.dp)`）。
+ *
+ * 底栏总宽 = 它 × tab 数 + 8dp 内边距，由此得到**确定的**底栏长度 ——
+ * 不随文案长短、字体缩放浮动（见底栏主体的注释）。
+ */
+private val KYANT_TAB_MIN_WIDTH = 76.dp
 
 /** 按位置算 tab 索引（与旧实现共用同一算法）。 */
 private fun indexAt(
