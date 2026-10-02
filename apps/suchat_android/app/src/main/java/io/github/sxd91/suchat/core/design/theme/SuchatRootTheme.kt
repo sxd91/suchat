@@ -60,13 +60,25 @@ fun SuchatRootTheme(
         SuchatThemeMode.Dark -> true
     }
 
-    // 莫奈取色：种子色固定为 Suchat 品牌绿，风格/规范取默认值。
-    // 说明：契约未规定种子色来源，此处用品牌绿而非系统壁纸 ——
-    // 保证「System 模式下动态取色也不偏离产品色相」。
+    // ★ 2026-10-02 修正（用户反馈「外观选不了莫奈取色的颜色和启用背景取色」）：
+    //
+    // 旧实现把「种子色 = 品牌绿」「模式 = MonetSystem」**硬编码**在这里，
+    // 所以设置页无论怎么改都不可能影响配色 —— 用户说「太敷衍」。
+    //
+    // 现在三个维度全部由 [SuchatAppearance] 驱动（改完即时生效）：
+    //  1. **颜色来源**（colorSource）：
+    //     · Monet / Custom → 用 appearance.seedColor 作种子色
+    //     · Wallpaper     → 用系统壁纸提取的色（由 miuix 的 MonetSystem 模式完成）
+    //  2. **种子色**（seedColor）：自定义颜色时的具体色值
+    //  3. **调色风格**（paletteStyleName）：TonalSpot / Vibrant / Expressive / …
+    val wallpaperMode = appearance.colorSource == "Wallpaper"
+    val paletteStyle = SuchatThemeDefaults.paletteStyleOf(appearance.paletteStyleName)
+    val seed = Color(appearance.seedColor)
+
     val scheme: ColorScheme = rememberDynamicColorScheme(
-        seedColor = SuchatThemeDefaults.seedColor,
+        seedColor = seed,
         isDark = darkTheme,
-        style = SuchatThemeDefaults.paletteStyle,
+        style = paletteStyle,
         specVersion = SuchatThemeDefaults.colorSpec,
     )
 
@@ -80,9 +92,12 @@ fun SuchatRootTheme(
     ) {
         SuchatMiuixThemeRoot(
             darkTheme = darkTheme,
-            paletteStyle = SuchatThemeDefaults.paletteStyle,
+            paletteStyle = paletteStyle,
             colorSpec = SuchatThemeDefaults.colorSpec,
-            seedColor = SuchatThemeDefaults.seedColor,
+            seedColor = seed,
+            // 「背景取色」交给 miuix 的 Monet 模式（读系统壁纸/取色服务）；
+            // 其余情况用「按种子色生成」的半莫奈模式。
+            monetFromSystem = wallpaperMode,
         ) {
             CompositionLocalProvider(
                 LocalSuchatTokens provides tokens,
@@ -105,15 +120,30 @@ private fun SuchatMiuixThemeRoot(
     paletteStyle: PaletteStyle,
     colorSpec: ColorSpec.SpecVersion,
     seedColor: Color,
+    monetFromSystem: Boolean,
     content: @Composable () -> Unit,
 ) {
     val miuixPalette = remember(paletteStyle) { paletteStyle.toMiuixPaletteStyle() }
     val miuixSpec = remember(colorSpec) { colorSpec.toMiuixColorSpec() }
     // darkTheme 参与 key：ThemeController 的 isDark 构造后不可写，
     // 深浅色切换必须重建 controller，否则颜色不跟随。
-    val controller = remember(seedColor, miuixPalette, miuixSpec, darkTheme) {
+    //
+    // colorSchemeMode 也参与 key：「背景取色 ↔ 莫奈取色」切换时要重建。
+    //
+    // ★ 2026-10-02：模式不再硬编码。
+    //  · monetFromSystem = true  → `MonetSystem`（**用系统壁纸提取的种子色**）
+    //  · 否则                    → `System`（用我们传入的 keyColor = 自选/品牌色）
+    //
+    // 注：miuix 的 `Monet*` 三档（MonetSystem/MonetLight/MonetDark）语义是
+    // 「种子色由系统取色服务提供」；`System/Light/Dark` 则是「用 keyColor」。
+    val mode = if (monetFromSystem) {
+        ColorSchemeMode.MonetSystem
+    } else {
+        ColorSchemeMode.System
+    }
+    val controller = remember(seedColor, miuixPalette, miuixSpec, darkTheme, mode) {
         ThemeController(
-            colorSchemeMode = ColorSchemeMode.MonetSystem,
+            colorSchemeMode = mode,
             keyColor = seedColor,
             colorSpec = miuixSpec,
             paletteStyle = miuixPalette,
@@ -125,9 +155,44 @@ private fun SuchatMiuixThemeRoot(
 
 /** Suchat 主题默认参数（种子色 = 品牌绿）。 */
 object SuchatThemeDefaults {
+    /** 品牌绿。 */
     val seedColor: Color = Color(0xFF07C160)
+
+    /** 品牌绿的 ARGB Int（用于 SharedPreferences 落盘与 [SuchatAppearance] 默认值）。 */
+    const val SEED_ARGB: Int = 0xFF07C160.toInt()
+
     val paletteStyle: PaletteStyle = PaletteStyle.TonalSpot
     val colorSpec: ColorSpec.SpecVersion = ColorSpec.SpecVersion.SPEC_2025
+
+    /** 9 种调色风格（与 material-kolor / miuix 的枚举一一对应）。 */
+    val paletteStyles: List<PaletteStyle> = listOf(
+        PaletteStyle.TonalSpot,
+        PaletteStyle.Neutral,
+        PaletteStyle.Vibrant,
+        PaletteStyle.Expressive,
+        PaletteStyle.Rainbow,
+        PaletteStyle.FruitSalad,
+        PaletteStyle.Monochrome,
+        PaletteStyle.Fidelity,
+        PaletteStyle.Content,
+    )
+
+    /** 按名字取调色风格（未知名字回落 TonalSpot）。 */
+    fun paletteStyleOf(name: String): PaletteStyle =
+        paletteStyles.firstOrNull { it.name == name } ?: PaletteStyle.TonalSpot
+
+    /** 调色风格的中文标签（设置页展示用）。 */
+    fun paletteLabel(style: PaletteStyle): String = when (style) {
+        PaletteStyle.TonalSpot -> "沉稳（默认）"
+        PaletteStyle.Neutral -> "中性"
+        PaletteStyle.Vibrant -> "鲜艳"
+        PaletteStyle.Expressive -> "张扬"
+        PaletteStyle.Rainbow -> "彩虹"
+        PaletteStyle.FruitSalad -> "果盘"
+        PaletteStyle.Monochrome -> "黑白"
+        PaletteStyle.Fidelity -> "忠实原色"
+        PaletteStyle.Content -> "内容取色"
+    }
 }
 
 // --- 枚举映射（material-kolor ↔ miuix） ---

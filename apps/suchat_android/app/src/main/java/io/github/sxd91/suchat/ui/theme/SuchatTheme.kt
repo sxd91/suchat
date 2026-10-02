@@ -14,6 +14,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import io.github.sxd91.suchat.core.design.theme.SuchatThemeDefaults
 
 enum class SuchatThemeMode { System, Light, Dark }
 
@@ -50,12 +51,54 @@ class SuchatAppearance(
     performance: String = "Full",
     transition: String = "Shared Element",
     reduceMotion: Boolean = false,
+    colorSource: String = ColorSource.Monet.key,
+    seedColor: Int = SuchatThemeDefaults.SEED_ARGB,
+    paletteStyleName: String = "TonalSpot",
 ) {
     var themeMode: SuchatThemeMode by mutableStateOf(themeMode)
     var glassMode: String by mutableStateOf(glassMode)
     var performance: String by mutableStateOf(performance)
     var transition: String by mutableStateOf(transition)
     var reduceMotion: Boolean by mutableStateOf(reduceMotion)
+
+    /**
+     * 颜色来源：`Monet`（按种子色生成）/ `Wallpaper`（背景取色，读系统壁纸）/
+     * `Custom`（用户自选颜色）。
+     *
+     * ★ 2026-10-02 新增（用户反馈「外观选不了莫奈取色的颜色和启用背景取色」）。
+     *
+     * 映射到 miuix 的 `ColorSchemeMode`：
+     *  - `Monet`  → `MonetSystem` / `MonetLight` / `MonetDark`（由 [themeMode] 定明暗）
+     *  - `Wallpaper` → 同上一组（区别只在**种子色**取自系统壁纸还是用户选的色）
+     *  - `Custom` → 用 [seedColor] 生成
+     */
+    var colorSource: String by mutableStateOf(colorSource)
+
+    /** 自定义种子色（ARGB Int，便于落盘；用 Int 而不是 Color 是为了 SharedPreferences）。 */
+    var seedColor: Int by mutableStateOf(seedColor)
+
+    /** material-kolor 的调色风格名（TonalSpot / Vibrant / Expressive / … 共 9 种）。 */
+    var paletteStyleName: String by mutableStateOf(paletteStyleName)
+}
+
+/**
+ * 颜色来源枚举。
+ *
+ * ## 为什么要分「莫奈种子色」与「背景取色」
+ *
+ * 两者在 Compose 里的实现是**同一套**（都走 material-kolor / miuix 的动态取色），
+ * 差别只在**种子色的来源**：
+ *  - `Monet`：种子色由用户/产品指定（品牌绿或自选），产出稳定可预期；
+ *  - `Wallpaper`：种子色交给系统从壁纸里提取 —— 换壁纸即换整套配色，
+ *    这是 Android 12+ 原生「莫奈取色」的默认行为，也是用户点名要的那一项。
+ *
+ * 之前主题层把种子色**硬编码**成品牌绿、模式**硬编码**成 `MonetSystem`，
+ * 所以设置页里根本没有可选项 —— 用户说「太敷衍」指的就是这个。
+ */
+enum class ColorSource(val key: String, val label: String) {
+    Monet("Monet", "莫奈取色"),
+    Wallpaper("Wallpaper", "背景取色"),
+    Custom("Custom", "自定义颜色"),
 }
 
 private val AuroraLight = lightColorScheme(
