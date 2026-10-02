@@ -69,6 +69,32 @@ class DampedDragAnimation(
 
     private val velocityTracker = VelocityTracker()
 
+    /**
+     * 跟手值通道（CONFLATED = 只保留最新值）。
+     *
+     * ## ★ 2026-10-02 修正（用户反馈「划着一卡一卡的」）
+     *
+     * 拖拽时 [snapToValue] 每帧被调用。旧实现每帧 `launch` 一个新协程去
+     * 写 `valueAnimation`（内部有 MutatorMutex）—— 一帧几十个协程排队互等，
+     * 表现就是「一卡一卡的」。
+     *
+     * 改成：所有跟手写入走这个 CONFLATED 通道，由**单个**消费协程串行处理。
+     *  - CONFLATED：中间帧自动丢弃，只处理最新的 → 天然丢帧、不积压；
+     *  - 单协程：不存在 Mutex 争抢 → 零竞争。
+     */
+    private val dragValueChannel = kotlinx.coroutines.channels.Channel<Float>(
+        kotlinx.coroutines.channels.Channel.CONFLATED,
+    )
+
+    init {
+        // 唯一的消费协程：串行把跟手值写进动画值。
+        animationScope.launch {
+            for (value in dragValueChannel) {
+                valueAnimation.snapTo(value)
+            }
+        }
+    }
+
     val value: Float get() = valueAnimation.value
     val targetValue: Float get() = valueAnimation.targetValue
     val pressProgress: Float get() = pressProgressAnimation.value
@@ -211,13 +237,19 @@ class DampedDragAnimation(
     }
 
     /**
-     * 拖动跟手：直接设置值（无动画）。拖动中高频调用时用 snap（spring 每次重启会
-     * 追不上手指，表现为「越拖越慢」，wekit 原版 onDrag 用 updateValue 有此问题）；
-     * 松手回位仍走 [animateToValue]/[updateValue] 动画。
+     * 拖动跟手：设置值（无动画）。
+     *
+     * ## ★ 2026-10-02 修正（用户反馈「划着一卡一卡的」）
+     *
+     * 旧实现每次调用都 `animationScope.launch { valueAnimation.snapTo(...) }`。
+     * 拖拽时本方法**每帧被调用**，于是每帧新建一个协程去抢 `valueAnimation`
+     * 的 MutatorMutex —— 大量协程排队互等，表现就是「一卡一卡的」。
+     *
+     * 修法：`trySend` 到 CONFLATED 通道（非挂起、无协程分配）——
+     * 中间帧自动合并，由 [dragValueChannel] 的单个消费协程串行写入。
      */
     fun snapToValue(value: Float) {
-        val target = value.coerceIn(valueRange)
-        animationScope.launch { valueAnimation.snapTo(target) }
+        dragValueChannel.trySend(value.coerceIn(valueRange))
     }
 
     fun animateToValue(value: Float) {

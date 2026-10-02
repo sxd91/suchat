@@ -119,6 +119,27 @@ fun WeKitDrawer(
     var lastX by remember { mutableFloatStateOf(0f) }
     var lastTimeMs by remember { mutableFloatStateOf(0f) }
 
+    // ★ 2026-10-02：手势的**同步**进度镜像。
+    //
+    // 跟手写入改为异步通道后（见下），若手势回调里再读 `progress.value`
+    // 会读到「上一帧」的旧值 —— 累加会丢步、松手判定会滞后。
+    // 所以维护一个与手势同帧同步推进的镜像值，手势计算只读它。
+    var dragProgressSync by remember { mutableFloatStateOf(0f) }
+
+    // ★ 2026-10-02：跟手值通道（CONFLATED）。
+    //
+    // 旧实现每帧 `scope.launch { progress.snapTo() }` → 大量协程抢
+    // Animatable 的 MutatorMutex → 拖拽卡顿。通道只保留最新值，
+    // 由单个消费者串行写入 —— 零协程分配、零锁竞争。
+    val dragProgressChannel = remember {
+        kotlinx.coroutines.channels.Channel<Float>(kotlinx.coroutines.channels.Channel.CONFLATED)
+    }
+    LaunchedEffect(Unit) {
+        for (value in dragProgressChannel) {
+            progress.snapTo(value)
+        }
+    }
+
     // WeKit：抽屉宽 = 屏宽 × 0.84。
     val drawerWidthPx = screenWidthPx * 0.84f
     val drawerWidthDp = with(density) { drawerWidthPx.toDp() }
@@ -161,10 +182,13 @@ fun WeKitDrawer(
                             lastX = offset.x
                             lastTimeMs = System.currentTimeMillis().toFloat()
                             velocityPxPerMs = 0f
+                            // 镜像对齐当前动画值（起手时不跳变）。
+                            dragProgressSync = progress.value
                         },
                         onDragEnd = {
                             // WeKit：带上速度投影的开合判定（160ms 投影 + 0.38 阈值）。
-                            val projected = progress.value +
+                            // 用同步镜像值判定，避免读到异步滞后的动画值。
+                            val projected = dragProgressSync +
                                 velocityPxPerMs * 160f / drawerWidthPx.coerceAtLeast(1f)
                             val open = projected >= 0.38f
                             dragging = false
@@ -173,7 +197,7 @@ fun WeKitDrawer(
                         },
                         onDragCancel = {
                             dragging = false
-                            val open = progress.value >= 0.38f
+                            val open = dragProgressSync >= 0.38f
                             if (open) onOpen() else onClose()
                         },
                     ) { change, dragAmount ->
@@ -183,12 +207,10 @@ fun WeKitDrawer(
                         velocityPxPerMs = (change.position.x - lastX) / dt
                         lastX = change.position.x
                         lastTimeMs = now
-                        scope.launch {
-                            progress.snapTo(
-                                (progress.value - dragAmount / drawerWidthPx.coerceAtLeast(1f))
-                                    .coerceIn(0f, 1f),
-                            )
-                        }
+                        // ★ 同步推进镜像值（手势计算唯一依据），再异步推给动画。
+                        dragProgressSync = (dragProgressSync - dragAmount / drawerWidthPx.coerceAtLeast(1f))
+                            .coerceIn(0f, 1f)
+                        dragProgressChannel.trySend(dragProgressSync)
                     }
                 }
                 .graphicsLayer {

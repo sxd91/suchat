@@ -241,6 +241,31 @@ private fun MainTabs(
     // 与手指的 scroll {} 抢驱动权 —— 表现为页面抖动 + 玻璃采样错乱（"玻璃消失"）。
     var draggingTab by remember { mutableStateOf(false) }
 
+    // ★ 2026-10-02 新增：拖拽跟手值的通道（CONFLATED = 只保留最新值）。
+    //
+    // 旧实现在 onDragFraction 里每帧 `scope.launch { pagerState.scroll{} }`，
+    // 每帧新建协程抢 MutatorMutex → 排队卡顿（用户反馈「划着一卡一卡的」）。
+    //
+    // 现在：每帧只 `trySend` 一个 Float（零协程分配），由下面这个**唯一**的
+    // 常驻协程串行消费。CONFLATED 保证中间帧自动丢弃，永远只处理最新目标值。
+    val dragFractionChannel = remember {
+        kotlinx.coroutines.channels.Channel<Float>(kotlinx.coroutines.channels.Channel.CONFLATED)
+    }
+
+    // 唯一消费者：把最新目标小数索引翻译成 pager 的像素增量。
+    LaunchedEffect(pagerState) {
+        for (fraction in dragFractionChannel) {
+            val currentFraction = pagerState.currentPage + pagerState.currentPageOffsetFraction
+            val pageWidthPx = pagerState.layoutInfo.pageSize.toFloat()
+            if (pageWidthPx <= 0f) continue
+            val deltaPages = fraction - currentFraction
+            val maxDelta = pageWidthPx
+            pagerState.scroll {
+                scrollBy((deltaPages * pageWidthPx).coerceIn(-maxDelta, maxDelta))
+            }
+        }
+    }
+
     // 底栏限位：胶囊 64dp + 12dp + 手势条（只抬高滚动终点，不挡内容折射）。
     val barBottomPadding = 12.dp +
         WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
@@ -298,30 +323,24 @@ private fun MainTabs(
             //    animateScrollToPage 打架，pager 高频抖动 → 底栏 backdrop 录制错乱
             //    → 玻璃看起来"自己消失变成普通 tab"。
             //
-            // scroll { scrollBy(delta) } 走的是同一条手势管线，天然带动画、
-            // 无抖动、玻璃采样稳定。
-            //
             // ## 双向联动（用户澄清）
             //
-            // ① 拖玻璃 → 页面跟随：[onDragFraction] 驱动 pager.scroll{} 逐帧跟随，
+            // ① 拖玻璃 → 页面跟随：[onDragFraction] 驱动 pager 逐帧跟随，
             //    玻璃松手回位时 [onDragEnd] 让页面吸附到整页（同步回位）。
             // ② 滑页面 → 玻璃跟随：[externalFractionProvider] 把 pager 的实时小数索引
             //    回报给底栏，玻璃指示器随之"出现 → 跟随 → 回位"。
+            //
+            // ## ★ 2026-10-02 修正（用户反馈「划着一卡一卡的」）
+            //
+            // 旧实现在 [onDragFraction] 里**每帧** `scope.launch { pagerState.scroll{} }`——
+            // 每个手势事件都新建协程去抢 `pagerState.scroll` 内部的 MutatorMutex，
+            // 协程互相排队 → 明显掉帧卡顿。
+            //
+            // 修法：用 [dragFractionChannel]（CONFLATED）承接每帧目标值，
+            // **单个**常驻协程串行消费 —— 中间帧自动丢弃、零协程分配、零锁竞争。
             onDragFraction = { fraction ->
                 if (!draggingTab) draggingTab = true
-                val currentFraction = pagerState.currentPage + pagerState.currentPageOffsetFraction
-                val deltaPages = fraction - currentFraction
-                // 转成像素增量：一页宽 = pager 自身尺寸 / 页数。
-                val pageWidthPx = pagerState.layoutInfo.pageSize
-                if (pageWidthPx > 0) {
-                    scope.launch {
-                        pagerState.scroll {
-                            // 限制单帧位移，避免猛拽时越界过大。
-                            val maxDelta = pageWidthPx.toFloat()
-                            scrollBy((deltaPages * pageWidthPx).coerceIn(-maxDelta, maxDelta))
-                        }
-                    }
-                }
+                dragFractionChannel.trySend(fraction)
             },
             // 松手：吸附到最近整页（这一步才带平移动画的收尾），并恢复同步。
             onDragEnd = { fraction ->
