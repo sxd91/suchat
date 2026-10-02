@@ -364,7 +364,15 @@ fun LiquidGlassTabBar(
             val isActive = index == currentIndex
             Column(
                 modifier = Modifier
-                    .defaultMinSize(minWidth = 64.dp)
+                    // ★ 2026-10-02 对齐 WeKit：76.dp（此前误用 64.dp，底栏整体偏窄）
+                    //
+                    // 这个值决定**每个 tab 的最小宽度**，四个 tab 撑起整条胶囊：
+                    // 64dp ⇒ 总宽 256dp；76dp ⇒ 总宽 304dp（宽了约 19%）。
+                    // WeKit 上游 FloatingBottomBar.kt:351 用的是 76.dp。
+                    //
+                    // 注意：底栏宽度是 `IntrinsicSize.Min` + 各 tab `weight(1f)`，
+                    // 所以这里改的是"下限"，实际宽度 = max(下限总和, 内容需求)。
+                    .defaultMinSize(minWidth = 76.dp)
                     .semantics(mergeDescendants = true) {
                         selected = isActive
                         role = Role.Tab
