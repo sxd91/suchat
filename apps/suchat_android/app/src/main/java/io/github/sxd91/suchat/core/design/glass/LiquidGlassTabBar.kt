@@ -250,6 +250,13 @@ fun LiquidGlassTabBar(
     val onSelectUpdated by rememberUpdatedState(onSelect)
     val onDragFractionUpdated by rememberUpdatedState(onDragFraction)
     val onDragEndUpdated by rememberUpdatedState(onDragEnd)
+    // ★ 2026-10-02：外部驱动源同样必须 rememberUpdatedState 包装。
+    //
+    // 调用方（MainActivity）传进来的 lambda 每次重组都是**新实例**（捕获了 pagerState）。
+    // 若直接把它当 LaunchedEffect 的 key，每个重组都会重启该 effect →
+    // snapshotFlow 反复重建 → 协程风暴 → 卡顿。
+    // 包装成 UpdatedState 后：effect 只启动一次，内部始终读到最新的 provider。
+    val externalFractionUpdated by rememberUpdatedState(externalFractionProvider)
     val gestureIndices = remember { IntArray(2) }
 
     // ★ 2026-10-02：「页面手势 → 玻璃跟随」链路的活跃状态。
@@ -373,8 +380,10 @@ fun LiquidGlassTabBar(
     // 修法：把「本链路是否活跃」也用 `pageDragFraction` 状态登记下来，
     // 让 `selectedIndexUpdated` 流在页面手势期间**同样让位**。
     if (externalFractionProvider != null) {
-        LaunchedEffect(dampedDragAnimation, externalFractionProvider) {
-            snapshotFlow { externalFractionProvider() }.collectLatest { fraction ->
+        // ★ key 里不再放 externalFractionProvider（每次重组都是新实例）——
+        // 只放 dampedDragAnimation，effect 生命周期与动画对象绑定。
+        LaunchedEffect(dampedDragAnimation) {
+            snapshotFlow { externalFractionUpdated?.invoke() }.collectLatest { fraction ->
                 if (fraction == null) {
                     // 页面手势结束（或未在滑动）：玻璃收尾回位。
                     // release() 只在「之前确实在跟随」时调一次，避免重复触发。
