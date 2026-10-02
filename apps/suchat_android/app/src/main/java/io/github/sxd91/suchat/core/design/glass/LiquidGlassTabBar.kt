@@ -34,6 +34,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -251,6 +252,16 @@ fun LiquidGlassTabBar(
     val onDragEndUpdated by rememberUpdatedState(onDragEnd)
     val gestureIndices = remember { IntArray(2) }
 
+    // ★ 2026-10-02：「页面手势 → 玻璃跟随」链路的活跃状态。
+    //
+    //  - [pageDragFraction]：页面手势中的当前小数索引；非 null 表示本链路活跃。
+    //    它同时作为「让位信号」——`selectedIndexUpdated` 流的同步在非 null 时跳过，
+    //    避免两条链路同时写 `valueAnimation`（双写入者冲突 → 抖动/掉帧）。
+    //  - [pagePressActive]：按压态是否已激活。press() 会启动 3 个协程，
+    //    用标志位保证一次手势只调一次（否则每帧调用 = 协程风暴）。
+    var pageDragFraction by remember { mutableStateOf<Float?>(null) }
+    var pagePressActive by remember { mutableStateOf(false) }
+
     fun indexAt(positionX: Float): Int {
         if (tabWidthPx == 0f) return currentIndex
         val horizontalPaddingPx = with(density) { 4.dp.toPx() }
@@ -324,14 +335,16 @@ fun LiquidGlassTabBar(
 
     LaunchedEffect(dampedDragAnimation) {
         snapshotFlow { selectedIndexUpdated }.collectLatest { index ->
-            // ★ 2026-10-02 修正（用户反馈「玻璃消失的时机」+ 优先级）：
+            // ★ 2026-10-02 修正（用户反馈「玻璃消失的时机」+ 优先级 + 卡顿）：
             //
             // 优先级规则：**优先识别是否松手（手动拖动中）→ 再识别是否切换页面**。
             //
-            // 手指按住期间，pager 可能因翻页而更新 selectedIndex；此时外部同步
-            // 必须让位给手势（否则会与手指的 onDrag 抢 valueAnimation，
-            // 指示器跳变 + 玻璃提前收场）。手势结束后才允许同步。
+            // 两类手势期间，外部同步都必须让位：
+            //  ① 手指按住玻璃（`isGestureActive`）：会与 onDrag 抢 valueAnimation；
+            //  ② 手指滑动页面（`pageDragFraction != null`）：会与跟手 snapTo 抢
+            //     （这是"划着一卡一卡的"的主因：spring 与 snapTo 互相取消重启）。
             if (dampedDragAnimation.isGestureActive) return@collectLatest
+            if (pageDragFraction != null) return@collectLatest
             if (currentIndex != index) {
                 currentIndex = index
                 dampedDragAnimation.animateToValue(index.toFloat())
@@ -349,25 +362,43 @@ fun LiquidGlassTabBar(
     // 与「拖玻璃」链路的分工：
     //  - 拖玻璃时 `isGestureActive == true` → 本链路让位，不抢；
     //  - 滑页面时 `isGestureActive == false` → 本链路驱动。
+    //
+    // ## ★ 2026-10-02 二次修正（用户反馈「划着一卡一卡的」）
+    //
+    // 第一版有个**双写入者冲突**：滑页面时除了本链路 snapTo 跟手，
+    // 上面的 `selectedIndexUpdated` 流也会因 pager 翻页而触发
+    // `animateToValue`（spring 动画）—— 两条链路同时写 `valueAnimation`，
+    // 互相取消重启 → 指示器抖动、掉帧（就是"一卡一卡的"）。
+    //
+    // 修法：把「本链路是否活跃」也用 `pageDragFraction` 状态登记下来，
+    // 让 `selectedIndexUpdated` 流在页面手势期间**同样让位**。
     if (externalFractionProvider != null) {
         LaunchedEffect(dampedDragAnimation, externalFractionProvider) {
             snapshotFlow { externalFractionProvider() }.collectLatest { fraction ->
                 if (fraction == null) {
                     // 页面手势结束（或未在滑动）：玻璃收尾回位。
-                    if (!dampedDragAnimation.isGestureActive) {
+                    // release() 只在「之前确实在跟随」时调一次，避免重复触发。
+                    if (pageDragFraction != null && !dampedDragAnimation.isGestureActive) {
                         dampedDragAnimation.release()
                     }
+                    pageDragFraction = null
+                    // 复位按压标志，下次手势可重新激活。
+                    pagePressActive = false
                     return@collectLatest
                 }
                 // 拖玻璃期间本链路完全让位（优先级：手动 > 页面）。
                 if (dampedDragAnimation.isGestureActive) return@collectLatest
 
-                // 玻璃"出现"：进入按压态（pressProgress → 1，玻璃特效亮起）。
-                // 只在刚进入时调用一次（press() 内部已有动画，重复调用无效但浪费）。
-                if (dampedDragAnimation.pressProgress < 0.5f) {
+                pageDragFraction = fraction
+
+                // 玻璃"出现"：进入按压态（玻璃特效亮起）。
+                // ★ 用标志位守卫：press() 会启动 3 个协程，
+                // 若每帧都调（pressProgress 尚未越过 0.5 时）就是协程风暴 → 卡顿。
+                if (!pagePressActive) {
+                    pagePressActive = true
                     dampedDragAnimation.press()
                 }
-                // 实时跟随页面进度（snapTo 即"跟手"，不用 spring 追）。
+                // 实时跟随页面进度（通道 + 单消费者，见 snapToValue）。
                 dampedDragAnimation.snapToValue(fraction)
             }
         }
