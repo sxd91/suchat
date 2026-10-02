@@ -1,14 +1,15 @@
 package io.github.sxd91.suchat.ui.component
 
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Easing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -21,11 +22,17 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,43 +49,55 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.sxd91.suchat.core.design.icon.SuchatIcons
+import kotlinx.coroutines.launch
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
+import kotlin.math.abs
 import top.yukonga.miuix.kmp.basic.Icon as MiuixIcon
 import top.yukonga.miuix.kmp.basic.Text as MiuixText
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
- * WeKit 空间抽屉（「负一屏」）。
+ * WeKit 空间抽屉（「负一屏」）—— **1:1 对齐 WeKit 上游实现**。
  *
- * ## 规格来源
+ * ## 规格来源（逐条抄自 WeKit 源码）
  *
- * 契约 `docs/android-experience.md` 原文：
+ * 源：`Ujhhgtg/WeKit` · `features/items/beautify/home_screen_panel/HomeSidePanel.kt`
  *
- * > The home side panel follows WeKit's spatial drawer model: the content shrinks
- * > up to **5%**, translates **right by 7dp** and **down by 8dp**, rounds its
- * > **corners**, and exposes the navigation panel underneath.
+ * | 项 | WeKit 原值 | 位置 |
+ * |---|---|---|
+ * | 抽屉宽度 | `DRAWER_WIDTH_FRACTION = 0.84f`（屏宽 84%） | HomeSidePanel.kt:1551 |
+ * | 遮罩最大透明度 | `DIM_MAX_ALPHA = 0.52f` | HomeSidePanel.kt:1552 |
+ * | 主内容缩放 | `scale = 1f - 0.05f * eased`（缩 5%） | :86 |
+ * | 主内容位移 | `translationX = 7dp * eased`、`translationY = 8dp * eased` | :87-88 |
+ * | 圆角 | `28dp * easedProgress` | :1331 |
+ * | 缓动 | `eased = 1 - (1-p)^1.35` | :83 |
+ * | 开合动画 | `duration = 120 + 120·|from-target| ms` + 减速插值 | :1049-1050 |
+ * | 抽屉滑入 | `panelView.translationX = -drawerWidth * (1-p)` | :1342 |
+ * | 开合阈值 | `openThreshold = 0.38`（含 160ms 速度投影） | GestureState:9,12 |
+ * | 触摸斜率 | `touchSlop = 8dp`、方向判定 `|dy| > |dx|*1.15` 则放弃 | GestureState:7,10 |
  *
- * ## ⚠️ 2026-10-02 修正：为什么必须大于契约里的 5% / 7dp
+ * ## 层级（关键：盖在主页上层）
  *
- * 用户实测反馈：**「进入负一屏什么都没看到」**。
- *
- * 根因是算术问题：只缩 5%、右移 7dp 时，左侧露出宽度 =
- * `屏宽 × 2.5% + 7dp`，在 1280px / 3.25 密度下约 **62px** ——
- * 这个宽度装不下任何面板内容（连一行标题都显示不全），
- * 所以用户看到的是「一片空白」。
- *
- * 契约里的 5% 是 WeKit 用来描述**动效幅度**的，而负一屏要「功能完善」
- * （用户的明确要求）就必须露出可用宽度。因此这里把参数调整为
- * **可配置的「露出比例」**，默认让左侧露出约 **34%** 屏宽：
+ * WeKit 用 `overlayRoot`（含 dim + panel）加到 `decorRoot` 顶部，
+ * **盖住**主内容（`contentWrapper`）：
  *
  * ```
- * 左露宽度 = 屏宽 × (scaleLoss/2 + translationFraction)
- *          = 屏宽 × (0.06 + 0.28) ≈ 34% × 屏宽 ≈ 435px ≈ 134dp
+ * Box
+ *  ├─ 主内容层（缩放/位移/圆角 + 被遮罩压暗）  ← 下层
+ *  └─ 抽屉层（dim 遮罩 + 面板，从左侧滑入）      ← 上层，盖住主内容
  * ```
  *
- * 面板内容按这个宽度排版（图标 + 文字 + 卡片摘要），完全可读可点。
+ * 用户要求「负一屏要覆盖一点主页内容在主页面上层」指的就是这条：
+ * 面板从左侧滑入并**压在主内容之上**（84% 宽，右侧露出 16% 被遮罩压暗的主页）。
  *
- * @param revealFraction 内容右移占屏宽的比例（默认 0.28）。
- * @param scaleLoss 内容缩放损失（默认 0.12，即缩到 88%）。
+ * ## 手势
+ *
+ *  - 左滑打开 / 右滑关闭（在内容层上识别水平拖拽）；
+ *  - 进度跟手：`progress += dx / drawerWidth`；
+ *  - 松手吸附：`progress + velocity*160ms/drawerWidth >= 0.38` 则开，否则关。
+ *
+ * @param panel 面板内容，参数为抽屉宽度（= 屏宽 × 0.84）。
  */
 @Composable
 fun WeKitDrawer(
@@ -86,327 +105,455 @@ fun WeKitDrawer(
     onOpen: () -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
-    revealFraction: Float = 0.28f,
-    scaleLoss: Float = 0.12f,
-    panel: @Composable (revealWidth: Dp) -> Unit,
+    panel: @Composable (drawerWidth: Dp) -> Unit,
     content: @Composable () -> Unit,
 ) {
-    // 动画进度：0 = 关闭，1 = 完全打开。
-    //
-    // ⚠️ 关键修正（闪退根因）：弹簧动画（DampingRatioLowBouncy）会**过冲** ——
-    // 关闭时 progress 会短暂变成负数（实测 -0.0177），而
-    // `RoundedCornerShape(负值)` 会抛 IllegalArgumentException：
-    //   "Corner size in Px can't be negative(topStart = -0.017714174, ...)"
-    // 用户现象：打开负一屏后返回主页时崩溃。
-    //
-    // 修法：用 `coerceIn(0f, 1f)` 把**所有**消费点（缩放/位移/圆角）都夹住。
-    // 不能只夹圆角 —— 缩放同理（scaleX = 1 - 0.05*负值 > 1 会轻微放大，
-    // 视觉上就是"弹一下"，也不是我们要的）。
-    val animatedProgress by animateFloatAsState(
-        targetValue = if (drawerOpen) 1f else 0f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioLowBouncy,
-            stiffness = Spring.StiffnessMediumLow,
-        ),
-        label = "wekit_drawer",
-    )
-
-    // 拖拽中的临时进度（手指跟手，松手后回落到 animatedProgress）。
-    var dragProgress by remember { mutableFloatStateOf(0f) }
-    // 夹紧到 [0,1]：弹簧过冲与拖拽越界都被消掉。
-    val rawProgress = if (dragProgress > 0f) dragProgress else animatedProgress
-    val progress = rawProgress.coerceIn(0f, 1f)
-
     val density = LocalDensity.current
-    // 屏宽像素（用于把 revealFraction 换算成位移像素）。
+    val scope = rememberCoroutineScope()
+
+    // 进度：0 = 关闭，1 = 完全打开。用 Animatable 以便跟手 snapTo + 松手动画。
+    val progress = remember { Animatable(0f) }
+    var dragging by remember { mutableStateOf(false) }
     var screenWidthPx by remember { mutableFloatStateOf(0f) }
+    var velocityPxPerMs by remember { mutableFloatStateOf(0f) }
+    var lastX by remember { mutableFloatStateOf(0f) }
+    var lastTimeMs by remember { mutableFloatStateOf(0f) }
+
+    // WeKit：抽屉宽 = 屏宽 × 0.84。
+    val drawerWidthPx = screenWidthPx * 0.84f
+    val drawerWidthDp = with(density) { drawerWidthPx.toDp() }
+
+    /** WeKit 的减速插值：`1 - (1-t)^1.4`（对应 DecelerateInterpolator(1.4f)）。 */
+    val decelerate = remember { Easing { t -> 1f - (1f - t).let { it * it * it * it }.powApprox(1.4f) } }
+
+    // 外部开关 → 动画（手势期间让位，见优先级说明）。
+    LaunchedEffect(drawerOpen, dragging) {
+        if (dragging) return@LaunchedEffect
+        val target = if (drawerOpen) 1f else 0f
+        val from = progress.value
+        if (abs(from - target) < 0.001f) {
+            progress.snapTo(target)
+            return@LaunchedEffect
+        }
+        // WeKit：duration = 120 + 120·|from-target|（ms）。
+        val duration = (120 + 120 * abs(target - from)).toInt()
+        progress.animateTo(target, tween(duration, easing = decelerate))
+    }
+
+    // 缓动进度（WeKit：eased = 1 - (1-p)^1.35）。
+    val p = progress.value.coerceIn(0f, 1f)
+    val eased = 1f - (1f - p).let { it * it * it }.powApprox(1.35f)
 
     Box(
         modifier = modifier
             .fillMaxSize()
             .onSizeChanged { screenWidthPx = it.width.toFloat() },
     ) {
-        // ---------- 下层：负一屏面板 ----------
-        // 面板铺满，但内容自身按「露出宽度」排版（见 WeKitPanelContent）。
-        // 面板随进度轻微淡入，避免刚开始拖动就闪出内容。
-        //
-        // 露出宽度计算（与 graphicsLayer 的变换严格一致）：
-        //   content 右移 revealFraction 屏宽；缩放围绕中心，左侧再让出
-        //   scaleLoss/2 屏宽 —— 合计 (revealFraction + scaleLoss/2) × 屏宽。
-        // 用 px→dp 交给面板排版（它按这个宽度限制内容）。
-        val revealWidthPx = screenWidthPx * (revealFraction + scaleLoss / 2f)
-        val revealWidthDp = with(density) { revealWidthPx.toDp() }
+        // ================= 下层：主内容（缩放/位移 + 被遮罩压暗） =================
         Box(
             Modifier
                 .fillMaxSize()
-                .graphicsLayer { alpha = (progress * 1.4f).coerceIn(0f, 1f) },
-        ) {
-            panel(revealWidthDp)
-        }
-
-        // ---------- 上层：主内容（被缩放平移） ----------
-        Box(
-            Modifier
-                .fillMaxSize()
-                // 左滑打开 / 右滑关闭（在内容层上识别水平拖拽）。
+                // 手势：左滑打开 / 右滑关闭。
                 .pointerInput(drawerOpen) {
                     detectHorizontalDragGestures(
-                        onDragEnd = {
-                            // 松手吸附：过半即开/关。
-                            if (dragProgress >= 0.5f) onOpen() else onClose()
-                            dragProgress = 0f
+                        onDragStart = { offset ->
+                            dragging = true
+                            lastX = offset.x
+                            lastTimeMs = System.currentTimeMillis().toFloat()
+                            velocityPxPerMs = 0f
                         },
-                        onDragCancel = { dragProgress = 0f },
-                    ) { _, dragAmount ->
-                        val base = if (drawerOpen) 1f else 0f
-                        // 左滑（dragAmount < 0）→ 进度增大。
-                        dragProgress = (base - dragAmount / size.width * 3f).coerceIn(0f, 1f)
+                        onDragEnd = {
+                            // WeKit：带上速度投影的开合判定（160ms 投影 + 0.38 阈值）。
+                            val projected = progress.value +
+                                velocityPxPerMs * 160f / drawerWidthPx.coerceAtLeast(1f)
+                            val open = projected >= 0.38f
+                            dragging = false
+                            // 同步外部状态；随后 LaunchedEffect 会动画到位。
+                            if (open) onOpen() else onClose()
+                        },
+                        onDragCancel = {
+                            dragging = false
+                            val open = progress.value >= 0.38f
+                            if (open) onOpen() else onClose()
+                        },
+                    ) { change, dragAmount ->
+                        // 进度跟手：progress -= dx / drawerWidth（左滑 dx<0 → 进度增大）。
+                        val now = System.currentTimeMillis().toFloat()
+                        val dt = (now - lastTimeMs).coerceAtLeast(1f)
+                        velocityPxPerMs = (change.position.x - lastX) / dt
+                        lastX = change.position.x
+                        lastTimeMs = now
+                        scope.launch {
+                            progress.snapTo(
+                                (progress.value - dragAmount / drawerWidthPx.coerceAtLeast(1f))
+                                    .coerceIn(0f, 1f),
+                            )
+                        }
                     }
                 }
                 .graphicsLayer {
-                    // 缩放（缩到 1 - scaleLoss）。
-                    val scale = 1f - scaleLoss * progress
+                    // WeKit：缩 5%、右移 7dp、下移 8dp（围绕中心缩放）。
+                    val scale = 1f - 0.05f * eased
                     scaleX = scale
                     scaleY = scale
-                    // 右移：露出左侧面板（核心修正点）。
-                    translationX = screenWidthPx * revealFraction * progress
-                    translationY = 8.dp.toPx() * progress
-                    // 圆角随进度增长（关闭时 0，打开时 28dp）。
-                    clip = progress > 0f
-                    shape = RoundedCornerShape(28.dp * progress)
-                    shadowElevation = 14.dp.toPx() * progress
+                    translationX = 7.dp.toPx() * eased
+                    translationY = 8.dp.toPx() * eased
+                    // WeKit：圆角 28dp × eased（夹紧防弹簧过冲出负值 → 崩溃）。
+                    clip = eased > 0f
+                    shape = RoundedCornerShape(28.dp * eased.coerceIn(0f, 1f))
                 }
-                .clip(RoundedCornerShape(28.dp * progress))
+                .clip(RoundedCornerShape(28.dp * eased.coerceIn(0f, 1f)))
                 .background(MiuixTheme.colorScheme.surface),
         ) {
             content()
 
-            // 打开时的遮罩：点击关闭。
-            if (progress > 0.01f) {
+            // 遮罩：点击关闭（WeKit：dimView 点击 → close）。
+            if (eased > 0.01f) {
                 Box(
                     Modifier
                         .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.18f * progress))
+                        .background(Color.Black.copy(alpha = 0.52f * eased))
                         .clickable(onClick = onClose),
                 )
             }
         }
+
+        // ================= 上层：抽屉面板（从左侧滑入，盖住主内容） =================
+        //
+        // WeKit：panelView 宽 = drawerWidth，translationX = -drawerWidth × (1-p)。
+        // 即「完全关闭时整体移到屏幕左外侧，打开时归位」——盖在主页上层。
+        Box(
+            Modifier
+                .align(Alignment.TopStart)
+                .fillMaxHeight()
+                .width(drawerWidthDp)
+                .graphicsLayer {
+                    translationX = -drawerWidthPx * (1f - p)
+                },
+        ) {
+            panel(drawerWidthDp)
+        }
     }
 }
 
+/** `x^exp` 的快速近似（仅用于缓动曲线，精度足够）。 */
+private fun Float.powApprox(exp: Float): Float {
+    if (this <= 0f) return 0f
+    return kotlin.math.exp(exp * kotlin.math.ln(this))
+}
+
+// ============================================================================
+// 面板内容（1:1 对齐 WeKit 的卡片布局）
+// ============================================================================
+
+/** 面板动作项（图标 + 标题 + 可选右侧文字）。 */
+private data class PanelAction(
+    val key: String,
+    val title: String,
+    val icon: ImageVector,
+    val trailing: String? = null,
+)
+
 /**
- * 负一屏面板内容 —— 功能完善版（用户第 4 条）。
+ * 负一屏面板内容 —— **1:1 对齐 WeKit 的 HomeSidePanelHome**。
  *
- * ## 布局约束（关键）
+ * ## 结构（自上而下，与 WeKit 一致）
  *
- * 面板只在**左侧露出区**排版（约 34% 屏宽 ≈ 130dp），右侧被主内容盖住。
- * 因此：
- *  - 内容宽度固定为「露出宽度」，不能 wrapContent（否则会被裁一半）；
- *  - 左侧留 padding 避开屏幕边缘；
- *  - 文字单行省略（宽度有限）。
+ *  1. **用户头部**：头像 58dp + 昵称（titleLarge/SemiBold）+ 状态 + 右箭头；
+ *  2. **时间卡**：`HH:mm`（displaySmall/Bold）+ 日期 + 问候语，
+ *     容器 `surfaceContainerLow`、圆角 24dp、内边距 18dp；
+ *  3. **收付款卡**：`primaryContainer` + 圆角 24dp（WeKit 的钱包卡同款；
+ *     我们无钱包数据，改为「收付款」入口）；
+ *  4. **竖排动作卡**：列表项（圆角 22dp / `surfaceContainerLow`），
+ *     项内容「图标 + 文字 + 右箭头」——对齐 WeKit 的 LIST_ITEM 排布；
+ *  5. **今日一句卡**：`surfaceContainerHighest` + 圆角 22dp，
+ *     标题行（引号图标 + 标题）+ 正文 + 右下角出处。
  *
- * ## 功能（全部可点，不是空壳）
+ * ## 宽度
  *
- *  1. **用户区**：头像（莫奈取色）+ 名字 + 状态，点击 → 个人信息；
- *  2. **快捷入口**：新建聊天 / 扫一扫 / 收付款（图标 + 文字）；
- *  3. **今日卡片**：日期 / 星期；
- *  4. **漂流瓶海域**：可捞数，点击直达漂流瓶页；
- *  5. **今日一句**；
- *  6. **功能列表**：朋友圈 / 收藏 / 设置。
+ * 抽屉宽 = 屏宽 × 84%，卡片内边距 18dp（与 WeKit 的 `padding(horizontal = 18.dp)` 一致）。
  *
- * @param revealWidth 左侧露出区宽度（由 [WeKitDrawer] 的 revealFraction 换算）。
+ * @param drawerWidth 抽屉宽度（= 屏宽 × 0.84）。
  */
 @Composable
 fun WeKitPanelContent(
     userName: String,
     statusText: String,
-    revealWidth: Dp,
+    drawerWidth: Dp,
     modifier: Modifier = Modifier,
     onItemClick: (String) -> Unit = {},
 ) {
     val c = MiuixTheme.colorScheme
     val statusBarPadding = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
 
+    // 时间（WeKit：每分钟刷新一次）。
+    var now by remember { mutableStateOf(LocalDateTime.now()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            val current = LocalDateTime.now()
+            now = current
+            val nextMinute = current.plusMinutes(1).withSecond(0).withNano(0)
+            val waitMs = java.time.Duration.between(current, nextMinute).toMillis()
+            kotlinx.coroutines.delay(waitMs.coerceAtLeast(1L))
+        }
+    }
+    val timeText = now.format(DateTimeFormatter.ofPattern("HH:mm"))
+    val dateText = now.format(DateTimeFormatter.ofPattern("M月d日 EEEE"))
+    val greeting = when (now.hour) {
+        in 5..11 -> "早上好，今天也要加油。"
+        in 12..17 -> "下午好，希望一切顺利。"
+        else -> "晚上好，好好休息。"
+    }
+
+    val actions = remember {
+        listOf(
+            PanelAction("add_friend", "添加朋友", SuchatIcons.Contacts),
+            PanelAction("moments", "朋友圈", SuchatIcons.Moments),
+            PanelAction("channels", "视频号", SuchatIcons.Channels),
+            PanelAction("mark_read", "一键已读", SuchatIcons.Messages, "标记全部会话"),
+            PanelAction("settings", "设置", SuchatIcons.Settings),
+        )
+    }
+
     Column(
         modifier = modifier
             .fillMaxHeight()
-            .width(revealWidth)
-            .background(c.surfaceContainer)
-            .padding(top = statusBarPadding + 16.dp, bottom = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+            .width(drawerWidth)
+            .background(c.surface),
     ) {
-        // --- 1. 用户区 ---
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 8.dp)
-                .clickable { onItemClick("profile") },
-            verticalAlignment = Alignment.CenterVertically,
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(
+                top = statusBarPadding + 14.dp,
+                bottom = 24.dp,
+            ),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            SuchatAvatar(name = userName, seed = userName, size = 44.dp, corner = 10.dp)
-            Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f)) {
-                MiuixText(
-                    text = userName,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = c.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                MiuixText(
-                    text = statusText,
-                    fontSize = 11.sp,
-                    color = c.onSurfaceSecondary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+            // --- 1. 用户头部（WeKit：avatar 58dp + 名字 + 状态 + chevron） ---
+            item(key = "profile") {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 18.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { onItemClick("profile") }
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    SuchatAvatar(name = userName, seed = userName, size = 58.dp, corner = 12.dp)
+                    Column(Modifier.weight(1f)) {
+                        MiuixText(
+                            text = userName,
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = c.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            MiuixText(
+                                text = statusText,
+                                fontSize = 13.sp,
+                                color = c.onSurfaceSecondary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false),
+                            )
+                            MiuixIcon(
+                                imageVector = SuchatIcons.ChevronForward,
+                                contentDescription = null,
+                                tint = c.onSurfaceVariantSummary,
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+                    }
+                }
             }
+
+            // --- 2. 时间卡（WeKit：surfaceContainerLow / 24dp / 18dp 内边距） ---
+            item(key = "datetime") {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 18.dp)
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(c.surfaceContainerHigh)
+                        .padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.Bottom,
+                    ) {
+                        MiuixText(
+                            text = timeText,
+                            fontSize = 40.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = c.onSurface,
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        MiuixText(
+                            text = dateText,
+                            fontSize = 12.sp,
+                            color = c.onSurfaceSecondary,
+                            modifier = Modifier.padding(bottom = 7.dp),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    MiuixText(
+                        text = greeting,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = c.onSurface,
+                    )
+                }
+            }
+
+            // --- 3. 收付款卡（WeKit：primaryContainer / 24dp） ---
+            item(key = "wallet") {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 18.dp)
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(c.primaryContainer)
+                        .clickable { onItemClick("pay") }
+                        .padding(18.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    MiuixIcon(
+                        imageVector = SuchatIcons.Wallet,
+                        contentDescription = null,
+                        tint = c.onPrimaryContainer,
+                        modifier = Modifier.size(24.dp),
+                    )
+                    Column(Modifier.weight(1f)) {
+                        MiuixText(
+                            text = "收付款",
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = c.onPrimaryContainer,
+                        )
+                        MiuixText(
+                            text = "向商家付款 · 二维码收款",
+                            fontSize = 12.sp,
+                            color = c.onPrimaryContainer.copy(alpha = 0.75f),
+                        )
+                    }
+                    MiuixIcon(
+                        imageVector = SuchatIcons.ChevronForward,
+                        contentDescription = null,
+                        tint = c.onPrimaryContainer.copy(alpha = 0.6f),
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+
+            // --- 4. 竖排动作卡（WeKit：LIST_ITEM 排布） ---
+            item(key = "actions") {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 18.dp)
+                        .clip(RoundedCornerShape(22.dp))
+                        .background(c.surfaceContainerHigh),
+                ) {
+                    actions.forEachIndexed { index, action ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onItemClick(action.key) }
+                                .padding(horizontal = 18.dp, vertical = 15.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            MiuixIcon(
+                                imageVector = action.icon,
+                                contentDescription = action.title,
+                                tint = c.primary,
+                                modifier = Modifier.size(22.dp),
+                            )
+                            MiuixText(
+                                text = action.title,
+                                fontSize = 16.sp,
+                                color = c.onSurface,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(start = 14.dp),
+                                maxLines = 1,
+                            )
+                            if (action.trailing != null) {
+                                MiuixText(
+                                    text = action.trailing,
+                                    fontSize = 12.sp,
+                                    color = c.onSurfaceVariantSummary,
+                                    modifier = Modifier.padding(end = 6.dp),
+                                )
+                            }
+                            MiuixIcon(
+                                imageVector = SuchatIcons.ChevronForward,
+                                contentDescription = null,
+                                tint = c.onSurfaceVariantSummary,
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+                        if (index != actions.lastIndex) {
+                            Box(
+                                Modifier
+                                    .padding(start = 54.dp)
+                                    .fillMaxWidth()
+                                    .height(0.5.dp)
+                                    .background(c.outline.copy(alpha = 0.3f)),
+                            )
+                        }
+                    }
+                }
+            }
+
+            // --- 5. 今日一句卡（WeKit：surfaceContainerHighest / 22dp） ---
+            item(key = "hitokoto") {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 18.dp)
+                        .clip(RoundedCornerShape(22.dp))
+                        .background(c.surfaceContainerHighest)
+                        .clickable { onItemClick("drift") }
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(7.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        MiuixIcon(
+                            imageVector = SuchatIcons.DriftBottle,
+                            contentDescription = null,
+                            tint = c.primary,
+                            modifier = Modifier.size(20.dp),
+                        )
+                        MiuixText(
+                            text = "漂流瓶 · 今日一句",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = c.onSurface,
+                            modifier = Modifier.padding(start = 8.dp),
+                        )
+                    }
+                    MiuixText(
+                        text = "愿你在每个陌生的地方，都能遇见温柔。",
+                        fontSize = 16.sp,
+                        color = c.onSurface,
+                    )
+                    MiuixText(
+                        text = "—— 来自 青岛的瓶子",
+                        fontSize = 11.sp,
+                        color = c.onSurfaceSecondary,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+
+            item(key = "bottom_space") { Box(Modifier.size(8.dp)) }
         }
-
-        PanelDivider()
-
-        // --- 2. 快捷入口（三个并排，图标 + 文字） ---
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-        ) {
-            QuickAction(SuchatIcons.Add, "发起聊天") { onItemClick("new_chat") }
-            QuickAction(SuchatIcons.Scan, "扫一扫") { onItemClick("scan") }
-            QuickAction(SuchatIcons.Wallet, "收付款") { onItemClick("pay") }
-        }
-
-        PanelDivider()
-
-        // --- 3. 今日卡片 + 4. 漂流瓶 + 5. 今日一句 ---
-        PanelCard(title = "今日", summary = "星期四 · 20:14")
-        PanelCard(
-            title = "漂流瓶海域",
-            summary = "3 个瓶子待开启",
-            onClick = { onItemClick("drift") },
-        )
-        PanelCard(title = "今日一句", summary = "愿你在陌生处遇见温柔")
-
-        PanelDivider()
-
-        // --- 6. 功能列表 ---
-        PanelRow(SuchatIcons.Moments, "朋友圈") { onItemClick("moments") }
-        PanelRow(SuchatIcons.Favorites, "收藏") { onItemClick("favorites") }
-        PanelRow(SuchatIcons.Settings, "设置") { onItemClick("settings") }
-
-        Spacer(Modifier.weight(1f))
-    }
-}
-
-/** 面板分隔线。 */
-@Composable
-private fun PanelDivider() {
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 14.dp)
-            .height(0.5.dp)
-            .background(MiuixTheme.colorScheme.outline.copy(alpha = 0.3f)),
-    )
-}
-
-/** 快捷入口（图标在上、文字在下）。 */
-@Composable
-private fun QuickAction(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    label: String,
-    onClick: () -> Unit,
-) {
-    val c = MiuixTheme.colorScheme
-    Column(
-        modifier = Modifier
-            .clip(RoundedCornerShape(12.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(5.dp),
-    ) {
-        MiuixIcon(
-            imageVector = icon,
-            contentDescription = label,
-            tint = c.primary,
-            modifier = Modifier.size(22.dp),
-        )
-        MiuixText(
-            text = label,
-            fontSize = 10.sp,
-            color = c.onSurfaceSecondary,
-            maxLines = 1,
-        )
-    }
-}
-
-/** 面板卡片（标题 + 摘要）。 */
-@Composable
-private fun PanelCard(
-    title: String,
-    summary: String,
-    onClick: (() -> Unit)? = null,
-) {
-    val c = MiuixTheme.colorScheme
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(c.surfaceContainerHigh)
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(3.dp),
-    ) {
-        MiuixText(
-            text = title,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Medium,
-            color = c.onSurface,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        MiuixText(
-            text = summary,
-            fontSize = 11.sp,
-            color = c.onSurfaceSecondary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
-}
-
-/** 面板功能行（图标 + 文字）。 */
-@Composable
-private fun PanelRow(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    label: String,
-    onClick: () -> Unit,
-) {
-    val c = MiuixTheme.colorScheme
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        MiuixIcon(
-            imageVector = icon,
-            contentDescription = label,
-            tint = c.onSurface,
-            modifier = Modifier.size(19.dp),
-        )
-        Spacer(Modifier.width(10.dp))
-        MiuixText(
-            text = label,
-            fontSize = 14.sp,
-            color = c.onSurface,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
     }
 }

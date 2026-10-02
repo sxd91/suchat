@@ -157,23 +157,23 @@ private fun SuchatAppShell(statusText: String) {
         drawerOpen = drawerOpen,
         onOpen = { drawerOpen = true },
         onClose = { drawerOpen = false },
-        panel = { revealWidth ->
+        panel = { drawerWidth ->
             WeKitPanelContent(
                 userName = io.github.sxd91.suchat.data.SampleData.me.name,
                 statusText = statusText,
-                revealWidth = revealWidth,
+                drawerWidth = drawerWidth,
                 onItemClick = { key ->
                     drawerOpen = false
-                    // 负一屏全部入口接线（每个 key 对应真实页面，不是空壳）。
+                    // 负一屏全部入口接线（每个 key 对应真实页面）。
                     when (key) {
                         "profile" -> nav.push(SuchatPage.Profile)
-                        "new_chat" -> nav.push(SuchatPage.AddMenu)
-                        "scan" -> nav.push(SuchatPage.Scan)
+                        "add_friend" -> nav.push(SuchatPage.NewFriends)
                         "pay" -> nav.push(SuchatPage.Services)
-                        "drift" -> nav.push(SuchatPage.DriftBottle)
                         "moments" -> nav.push(SuchatPage.Moments)
-                        "favorites" -> nav.push(SuchatPage.Favorites)
+                        "channels" -> nav.push(SuchatPage.Channels)
+                        "mark_read" -> { /* 演示：仅关闭面板 */ }
                         "settings" -> nav.push(SuchatPage.Settings)
+                        "drift" -> nav.push(SuchatPage.DriftBottle)
                     }
                 },
             )
@@ -300,6 +300,13 @@ private fun MainTabs(
             //
             // scroll { scrollBy(delta) } 走的是同一条手势管线，天然带动画、
             // 无抖动、玻璃采样稳定。
+            //
+            // ## 双向联动（用户澄清）
+            //
+            // ① 拖玻璃 → 页面跟随：[onDragFraction] 驱动 pager.scroll{} 逐帧跟随，
+            //    玻璃松手回位时 [onDragEnd] 让页面吸附到整页（同步回位）。
+            // ② 滑页面 → 玻璃跟随：[externalFractionProvider] 把 pager 的实时小数索引
+            //    回报给底栏，玻璃指示器随之"出现 → 跟随 → 回位"。
             onDragFraction = { fraction ->
                 if (!draggingTab) draggingTab = true
                 val currentFraction = pagerState.currentPage + pagerState.currentPageOffsetFraction
@@ -323,6 +330,16 @@ private fun MainTabs(
                     pagerState.animateScrollToPage(target)
                     draggingTab = false
                 }
+            },
+            // ② 页面 → 玻璃：把 pager 的实时小数索引（含拖拽中的 offsetFraction）
+            //    回报给底栏。返回 null 表示页面未在手势中（玻璃应回位）。
+            //
+            // 判定「页面手势中」：offsetFraction 非零（正在被拖动或动画中）。
+            // 归零且 currentPage == targetPage 时视为停稳 → 返回 null 让玻璃收尾。
+            externalFractionProvider = {
+                val offset = pagerState.currentPageOffsetFraction
+                val settled = offset == 0f && pagerState.currentPage == pagerState.targetPage
+                if (settled) null else pagerState.currentPage + offset
             },
             modifier = Modifier
                 .align(Alignment.BottomCenter)

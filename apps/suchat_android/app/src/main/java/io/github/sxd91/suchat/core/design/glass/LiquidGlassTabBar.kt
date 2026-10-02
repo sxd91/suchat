@@ -172,6 +172,29 @@ private val iosIndicatorSpecular = Highlight(
  *   并在内容层用 `.layerBackdrop(backdrop)` 录制。
  * @param onDragFraction 拖拽过程中的实时进度（小数索引，基于 targetValue）。
  * @param onDragEnd 松手回调，参数为最终小数索引（调用方据此吸附）。
+ * @param externalFractionProvider 外部驱动源（页面手势）。
+ *
+ * ## ★ 2026-10-02 双向联动（用户澄清的完整语义）
+ *
+ * 底栏与页面必须是**双向**联动，而不是单向：
+ *
+ *  1. **拖玻璃 → 页面跟随**（[onDragFraction] / [onDragEnd]）：
+ *     手指按住玻璃拖动时，页面按玻璃的实时进度平移；玻璃回位时页面同步回位。
+ *  2. **滑页面 → 玻璃跟随**（[externalFractionProvider]）：
+ *     手指在内容区左右滑动时，玻璃指示器"出现"并跟随页面滑动进度移动，
+ *     松手后页面吸附、玻璃同步回位。
+ *
+ * ## 优先级（用户明确要求）
+ *
+ * **优先识别是否松手（手动）→ 再识别是否切换页面**：
+ * 手指按住期间（`isGestureActive`）一切以手势为准，外部同步一律让位；
+ * 只有手势结束后，页面状态才允许回写玻璃。
+ * 两条链路各自有自己的手势源，互不抢占。
+ *
+ * @param externalFractionProvider 页面手势驱动源：返回当前页面小数索引
+ *   （`currentPage + currentPageOffsetFraction`）；返回 `null` 表示页面未在手势中。
+ *   用 `() -> Float?` 而非直接传值，是为了让内部 `snapshotFlow` 读取状态，
+ *   避免每一帧都触发调用方（MainActivity）重组。
  */
 @Composable
 fun LiquidGlassTabBar(
@@ -185,6 +208,7 @@ fun LiquidGlassTabBar(
     liquidGlassBlurRadius: Dp = 4.dp,
     onDragFraction: ((Float) -> Unit)? = null,
     onDragEnd: ((Float) -> Unit)? = null,
+    externalFractionProvider: (() -> Float?)? = null,
 ) {
     if (items.isEmpty()) return
 
@@ -300,9 +324,51 @@ fun LiquidGlassTabBar(
 
     LaunchedEffect(dampedDragAnimation) {
         snapshotFlow { selectedIndexUpdated }.collectLatest { index ->
+            // ★ 2026-10-02 修正（用户反馈「玻璃消失的时机」+ 优先级）：
+            //
+            // 优先级规则：**优先识别是否松手（手动拖动中）→ 再识别是否切换页面**。
+            //
+            // 手指按住期间，pager 可能因翻页而更新 selectedIndex；此时外部同步
+            // 必须让位给手势（否则会与手指的 onDrag 抢 valueAnimation，
+            // 指示器跳变 + 玻璃提前收场）。手势结束后才允许同步。
+            if (dampedDragAnimation.isGestureActive) return@collectLatest
             if (currentIndex != index) {
                 currentIndex = index
                 dampedDragAnimation.animateToValue(index.toFloat())
+            }
+        }
+    }
+
+    // ★ 2026-10-02 新增：页面手势 → 玻璃跟随（双向联动的第二向）。
+    //
+    // 用户在内容区左右滑动页面（HorizontalPager 自己处理手势）时：
+    //  - 玻璃指示器"出现"（进入按压态，玻璃特效亮起）；
+    //  - 指示器实时跟随页面的滑动进度（currentPage + offsetFraction）；
+    //  - 手指松开 → 页面吸附整页 → 指示器同步收尾（回位）。
+    //
+    // 与「拖玻璃」链路的分工：
+    //  - 拖玻璃时 `isGestureActive == true` → 本链路让位，不抢；
+    //  - 滑页面时 `isGestureActive == false` → 本链路驱动。
+    if (externalFractionProvider != null) {
+        LaunchedEffect(dampedDragAnimation, externalFractionProvider) {
+            snapshotFlow { externalFractionProvider() }.collectLatest { fraction ->
+                if (fraction == null) {
+                    // 页面手势结束（或未在滑动）：玻璃收尾回位。
+                    if (!dampedDragAnimation.isGestureActive) {
+                        dampedDragAnimation.release()
+                    }
+                    return@collectLatest
+                }
+                // 拖玻璃期间本链路完全让位（优先级：手动 > 页面）。
+                if (dampedDragAnimation.isGestureActive) return@collectLatest
+
+                // 玻璃"出现"：进入按压态（pressProgress → 1，玻璃特效亮起）。
+                // 只在刚进入时调用一次（press() 内部已有动画，重复调用无效但浪费）。
+                if (dampedDragAnimation.pressProgress < 0.5f) {
+                    dampedDragAnimation.press()
+                }
+                // 实时跟随页面进度（snapTo 即"跟手"，不用 spring 追）。
+                dampedDragAnimation.snapToValue(fraction)
             }
         }
     }
