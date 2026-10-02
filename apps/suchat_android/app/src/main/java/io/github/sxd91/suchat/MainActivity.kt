@@ -67,7 +67,11 @@ import io.github.sxd91.suchat.ui.page.secondary.SettingsScreen
 import io.github.sxd91.suchat.ui.page.secondary.TagsScreen
 import io.github.sxd91.suchat.ui.setup.ServerSetupScreen
 import io.github.sxd91.suchat.ui.theme.SuchatAppearance
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
+import kotlin.math.abs
+import kotlin.math.sign
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -241,28 +245,44 @@ private fun MainTabs(
     // 与手指的 scroll {} 抢驱动权 —— 表现为页面抖动 + 玻璃采样错乱（"玻璃消失"）。
     var draggingTab by remember { mutableStateOf(false) }
 
-    // ★ 2026-10-02 新增：拖拽跟手值的通道（CONFLATED = 只保留最新值）。
+    // ★ 2026-10-02 新增：页面线性跟随目标（拖玻璃时驱动页面）。
     //
-    // 旧实现在 onDragFraction 里每帧 `scope.launch { pagerState.scroll{} }`，
-    // 每帧新建协程抢 MutatorMutex → 排队卡顿（用户反馈「划着一卡一卡的」）。
+    // ## 用户要求
     //
-    // 现在：每帧只 `trySend` 一个 Float（零协程分配），由下面这个**唯一**的
-    // 常驻协程串行消费。CONFLATED 保证中间帧自动丢弃，永远只处理最新目标值。
-    val dragFractionChannel = remember {
-        kotlinx.coroutines.channels.Channel<Float>(kotlinx.coroutines.channels.Channel.CONFLATED)
-    }
+    // > 「玻璃滑动时界面也要线性移动」
+    //
+    // 旧实现把玻璃位置**直接映射**成页面位移（`scrollBy(deltaPages * pageWidth)`）——
+    // 页面瞬间对齐玻璃，是"锁死跟随"，生硬无速度感。
+    //
+    // 现在改为**恒定速度逼近**（与玻璃跟随页面那一侧对称）：
+    // 页面以固定速度追向玻璃目标位置，观感是一条平滑的线性位移。
+    val pageTargetFraction = remember { MutableStateFlow<Float?>(null) }
 
-    // 唯一消费者：把最新目标小数索引翻译成 pager 的像素增量。
+    // 唯一消费者：把最新目标小数索引**线性**推进到 pager（恒速，非瞬移）。
     LaunchedEffect(pagerState) {
-        for (fraction in dragFractionChannel) {
-            val currentFraction = pagerState.currentPage + pagerState.currentPageOffsetFraction
-            val pageWidthPx = pagerState.layoutInfo.pageSize.toFloat()
-            if (pageWidthPx <= 0f) continue
-            val deltaPages = fraction - currentFraction
-            val maxDelta = pageWidthPx
-            pagerState.scroll {
-                scrollBy((deltaPages * pageWidthPx).coerceIn(-maxDelta, maxDelta))
+        // 恒定速度：每秒跨越的页数（≈167ms/页，与玻璃侧一致）。
+        val pagesPerSecond = 6f
+        val frameMs = 8L
+        val step = pagesPerSecond * (frameMs / 1000f)
+        while (true) {
+            val target = pageTargetFraction.value
+            if (target == null) {
+                delay(frameMs)
+                continue
             }
+            val pageWidthPx = pagerState.layoutInfo.pageSize.toFloat()
+            if (pageWidthPx <= 0f) {
+                delay(frameMs)
+                continue
+            }
+            val current = pagerState.currentPage + pagerState.currentPageOffsetFraction
+            val diff = target - current
+            // 差值小于一步 → 直接对齐（消除锯齿）；否则按恒定步长推进。
+            val advance = if (abs(diff) <= step) diff else step * diff.sign
+            if (advance != 0f) {
+                pagerState.scroll { scrollBy(advance * pageWidthPx) }
+            }
+            delay(frameMs)
         }
     }
 
@@ -330,21 +350,22 @@ private fun MainTabs(
             // ② 滑页面 → 玻璃跟随：[externalFractionProvider] 把 pager 的实时小数索引
             //    回报给底栏，玻璃指示器随之"出现 → 跟随 → 回位"。
             //
-            // ## ★ 2026-10-02 修正（用户反馈「划着一卡一卡的」）
+            // ## ★ 2026-10-02 修正（用户反馈「玻璃滑动时界面也要线性移动」）
             //
-            // 旧实现在 [onDragFraction] 里**每帧** `scope.launch { pagerState.scroll{} }`——
-            // 每个手势事件都新建协程去抢 `pagerState.scroll` 内部的 MutatorMutex，
-            // 协程互相排队 → 明显掉帧卡顿。
+            // 旧实现把玻璃位置**直接映射**成页面位移（deltaPages × pageWidth）——
+            // 页面瞬间对齐玻璃，是"锁死跟随"。
             //
-            // 修法：用 [dragFractionChannel]（CONFLATED）承接每帧目标值，
-            // **单个**常驻协程串行消费 —— 中间帧自动丢弃、零协程分配、零锁竞争。
+            // 现在：onDragFraction 只**登记目标**（零协程），由上面那个常驻协程
+            // 以恒定速度把 pager 推进到目标位置 —— 页面做线性位移。
             onDragFraction = { fraction ->
                 if (!draggingTab) draggingTab = true
-                dragFractionChannel.trySend(fraction)
+                pageTargetFraction.value = fraction
             },
-            // 松手：吸附到最近整页（这一步才带平移动画的收尾），并恢复同步。
+            // 松手：页面吸附到最近整页（带平移动画收尾），恢复导航同步。
             onDragEnd = { fraction ->
                 val target = fraction.roundToIntSafely(pagerState.pageCount)
+                // 停止线性跟随（交给下面的吸附动画收尾）。
+                pageTargetFraction.value = null
                 scope.launch {
                     pagerState.animateScrollToPage(target)
                     draggingTab = false
