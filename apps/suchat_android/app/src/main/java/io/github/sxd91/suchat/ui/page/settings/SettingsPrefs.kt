@@ -37,6 +37,9 @@ class SuchatSettings internal constructor(private val prefs: android.content.Sha
     /** 选项值（key 见 [ChoiceKey]）。 */
     private val choices: SnapshotStateMap<String, String> = mutableStateMapOf()
 
+    /** 数值设置值（key 见 [IntKey]）。 */
+    private val ints: SnapshotStateMap<String, Int> = mutableStateMapOf()
+
     init {
         // 首次构造把落盘值全量读进内存状态（同步、一次性）。
         BoolKey.entries.forEach { key ->
@@ -44,6 +47,9 @@ class SuchatSettings internal constructor(private val prefs: android.content.Sha
         }
         ChoiceKey.entries.forEach { key ->
             choices[key.id] = prefs.getString(key.id, key.default) ?: key.default
+        }
+        IntKey.entries.forEach { key ->
+            ints[key.id] = prefs.getInt(key.id, key.default).coerceIn(key.min, key.max)
         }
     }
 
@@ -65,15 +71,27 @@ class SuchatSettings internal constructor(private val prefs: android.content.Sha
         prefs.edit().putString(key.id, value).apply()
     }
 
-    /** 某个开关是否被用户改过（用于「恢复默认」按钮的文案）。 */
+    /** 读数值项（自动夹到 `min..max`）。 */
+    fun int(key: IntKey): Int = (ints[key.id] ?: key.default).coerceIn(key.min, key.max)
+
+    /** 写数值项（夹紧后立即生效 + 异步落盘）。 */
+    fun setInt(key: IntKey, value: Int) {
+        val v = value.coerceIn(key.min, key.max)
+        ints[key.id] = v
+        prefs.edit().putInt(key.id, v).apply()
+    }
+
+    /** 是否所有设置都在默认值（用于「恢复默认」按钮文案）。 */
     fun isDefault(): Boolean =
         BoolKey.entries.all { bool(it) == it.default } &&
-            ChoiceKey.entries.all { choice(it) == it.default }
+            ChoiceKey.entries.all { choice(it) == it.default } &&
+            IntKey.entries.all { int(it) == it.default }
 
     /** 全部恢复默认。 */
     fun resetAll() {
         BoolKey.entries.forEach { setBool(it, it.default) }
         ChoiceKey.entries.forEach { setChoice(it, it.default) }
+        IntKey.entries.forEach { setInt(it, it.default) }
     }
 }
 
@@ -126,7 +144,6 @@ enum class BoolKey(val id: String, val default: Boolean) {
     ReduceMotion("set_reduce_motion", false),
     DynamicColor("set_dynamic_color", true),
 }
-
 /** 多选一设置项。 */
 enum class ChoiceKey(val id: String, val default: String) {
     /** 主题模式：System / Light / Dark。 */
@@ -146,6 +163,25 @@ enum class ChoiceKey(val id: String, val default: String) {
 
     /** 字体大小档。 */
     FontScale("set_font_scale", "标准"),
+}
+
+/** 数值设置项（整数百分比）。 */
+enum class IntKey(val id: String, val default: Int, val min: Int, val max: Int) {
+    /**
+     * 底栏缩放（对齐 WeKit 的 `nav_bar_scale`，50–150%，默认 100）。
+     *
+     * ## 为什么是「覆盖 LocalDensity」而不是 graphicsLayer 缩放
+     *
+     * WeKit 的做法（`ReplaceNavigationBar.kt:648-651`）：
+     * ```
+     * val scaledDensity = Density(baseDensity.density * barScale, baseDensity.fontScale)
+     * CompositionLocalProvider(LocalDensity provides scaledDensity) { FloatingBottomBar(...) }
+     * ```
+     * 这样底栏内部**每一个 dp/sp**（高度、图标、胶囊、模糊半径、阴影）都按新尺寸
+     * **重新布局**，而不是被整体拉伸栅格化 —— 玻璃纹理保持清晰、触摸区与所见一致。
+     * 用 `graphicsLayer { scaleX/scaleY }` 会把已渲染的位图放大，玻璃会糊。
+     */
+    TabBarScale("set_tab_bar_scale", 100, 50, 150),
 }
 
 /** 设置项 CompositionLocal（全树共享同一实例）。 */

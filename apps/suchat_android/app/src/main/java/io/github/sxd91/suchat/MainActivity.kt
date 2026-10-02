@@ -36,6 +36,8 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Job
@@ -89,6 +91,7 @@ import io.github.sxd91.suchat.ui.page.settings.DevicesScreen
 import io.github.sxd91.suchat.ui.page.settings.FontSizeScreen
 import io.github.sxd91.suchat.ui.page.settings.GeneralScreen
 import io.github.sxd91.suchat.ui.page.settings.HelpScreen
+import io.github.sxd91.suchat.ui.page.settings.IntKey
 import io.github.sxd91.suchat.ui.page.settings.LocalSuchatSettings
 import io.github.sxd91.suchat.ui.page.settings.NotificationsScreen
 import io.github.sxd91.suchat.ui.page.settings.PrivacyScreen
@@ -515,6 +518,8 @@ private fun MainTabs(
 ) {
     val backdrop = rememberLayerBackdrop()
     val scope = rememberCoroutineScope()
+    // 设置实例（读「底栏大小」等即时生效项）。根层已 provide，这里取同一个。
+    val settings = LocalSuchatSettings.current
 
     val tabs = remember { SuchatTab.entries.map { TabItem(it.label, it.iconKey) } }
     val pagerState = rememberPagerState(
@@ -570,17 +575,33 @@ private fun MainTabs(
             }
         }
 
-        LiquidGlassTabBar(
-            items = tabs,
-            selectedIndex = pagerState.targetPage,
-            onSelect = { index -> scope.launch { pagerState.animateScrollToPage(index) } },
-            backdrop = backdrop,
-            // 外观档位（设置页可改，改完即时生效）。
-            mode = tabBarMode,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = barBottomPadding),
-        )
+        // ★ 底栏尺寸（设置 → 外观 → 底栏大小，对齐 WeKit 的 nav_bar_scale）。
+        //
+        // WeKit 的做法（ReplaceNavigationBar.kt:648-651）：**覆盖 LocalDensity**
+        // 而不是用 graphicsLayer 缩放 —— 底栏内每个 dp/sp（高度/图标/胶囊/模糊半径/
+        // 阴影）都按新尺寸重新布局，玻璃纹理保持清晰、触摸区与所见一致。
+        // 直接 scale 已渲染的位图会把玻璃糊掉。
+        //
+        // 只需包住底栏本体（不需要连内容层一起缩放）。
+        val baseDensity = LocalDensity.current
+        val barScale = (settings?.int(IntKey.TabBarScale) ?: 100) / 100f
+        val scaledDensity = remember(baseDensity, barScale) {
+            Density(baseDensity.density * barScale, baseDensity.fontScale)
+        }
+
+        CompositionLocalProvider(LocalDensity provides scaledDensity) {
+            LiquidGlassTabBar(
+                items = tabs,
+                selectedIndex = pagerState.targetPage,
+                onSelect = { index -> scope.launch { pagerState.animateScrollToPage(index) } },
+                backdrop = backdrop,
+                // 外观档位（设置页可改，改完即时生效）。
+                mode = tabBarMode,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = barBottomPadding),
+            )
+        }
     }
 }
 

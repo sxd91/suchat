@@ -29,6 +29,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.roundToInt
 import io.github.sxd91.suchat.BuildConfig
 import io.github.sxd91.suchat.core.design.icon.SuchatIcons
 import io.github.sxd91.suchat.core.nav.SuchatNavigator
@@ -40,6 +41,7 @@ import io.github.sxd91.suchat.ui.component.SuchatScaffold
 import io.github.sxd91.suchat.ui.theme.SuchatAppearance
 import io.github.sxd91.suchat.ui.theme.SuchatThemeMode
 import top.yukonga.miuix.kmp.basic.Icon as MiuixIcon
+import top.yukonga.miuix.kmp.basic.Slider as MiuixSlider
 import top.yukonga.miuix.kmp.basic.Switch as MiuixSwitch
 import top.yukonga.miuix.kmp.basic.Text as MiuixText
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -207,6 +209,59 @@ private fun GroupGap(height: Dp = 8.dp) {
             .height(height)
             .background(MiuixTheme.colorScheme.surfaceContainer),
     )
+}
+
+/**
+ * 整数滑块行（用于「底栏大小」这类百分比设置）。
+ *
+ * ## 为什么用 miuix 的 `Slider`
+ *
+ * 全应用组件必须同源（用户要求）。miuix 的 `Slider` 有它特有的
+ * 拖拽吸附与触感反馈，跟 Material3 的不是一套观感。
+ *
+ * ## 拖动即时生效
+ *
+ * `onValueChange` 里直接写 [SuchatSettings.setInt] —— 该值由
+ * `mutableStateMapOf` 持有，写入即触发读它的 `MainTabs` 重组，
+ * 底栏尺寸当场变化，不用松手也不用重进页面。
+ */
+@Composable
+private fun IntSliderRow(
+    title: String,
+    value: Int,
+    min: Int,
+    max: Int,
+    onValueChange: (Int) -> Unit,
+) {
+    val c = MiuixTheme.colorScheme
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 20.dp, end = 20.dp, top = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            MiuixText(
+                text = title,
+                fontSize = 16.sp,
+                color = c.onSurface,
+                modifier = Modifier.weight(1f),
+            )
+            MiuixText(
+                text = "$value%",
+                fontSize = 14.sp,
+                color = c.onSurfaceSecondary,
+            )
+        }
+        MiuixSlider(
+            value = value.toFloat(),
+            onValueChange = { onValueChange(it.roundToInt()) },
+            valueRange = min.toFloat()..max.toFloat(),
+            steps = (max - min) / 5 - 1, // 每 5% 一档
+            modifier = Modifier.padding(horizontal = 20.dp),
+        )
+        Spacer(Modifier.height(10.dp))
+    }
 }
 
 /** 段落小标题（组内说明文字）。 */
@@ -1002,6 +1057,18 @@ fun AppearanceScreen(
                             appearance.reduceMotion = it
                         },
                         showDivider = false,
+                    )
+                }
+            }
+            item(key = "tab_scale") {
+                GroupGap()
+                Column(Modifier.background(c.surface)) {
+                    IntSliderRow(
+                        title = "底栏大小",
+                        value = settings.int(IntKey.TabBarScale),
+                        min = IntKey.TabBarScale.min,
+                        max = IntKey.TabBarScale.max,
+                        onValueChange = { settings.setInt(IntKey.TabBarScale, it) },
                     )
                 }
             }
