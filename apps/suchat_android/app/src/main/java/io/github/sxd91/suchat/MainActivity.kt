@@ -55,6 +55,7 @@ import io.github.sxd91.suchat.core.nav.SuchatTab
 import io.github.sxd91.suchat.core.nav.rememberSuchatNavigator
 import io.github.sxd91.suchat.ui.component.WeKitDrawer
 import io.github.sxd91.suchat.ui.component.WeKitPanelContent
+import io.github.sxd91.suchat.ui.component.blockPointerInput
 import io.github.sxd91.suchat.ui.navigation.PredictiveBackContent
 import io.github.sxd91.suchat.ui.navigation.PredictiveBackEffect
 import io.github.sxd91.suchat.ui.page.chat.ChatDetailScreen
@@ -408,9 +409,19 @@ private fun PageLayerHost(
             key(slot) {
                 // 上层槽（决定本层的退让量）；结构变化才会变，不进每帧热路径。
                 val above = slots.getOrNull(index + 1)
+                // ★ 2026-10-02 修「下面会穿透点击下层」：
+                //
+                // 页面层视觉上盖住了主 Tab 层，但**没有消费指针事件** ——
+                // Compose 的命中测试只认带 pointerInput 的节点，页面里的空白处
+                // （面板四周、列表尾部）点击会穿透到底下的会话列表。
+                //
+                // 这里给页面层挂上 blockPointerInput：在 `Main` 阶段兜底消费
+                // 子节点**没处理**的事件（见该扩展的文档），既能挡住下层，
+                // 又不影响页面内任何控件的正常响应。
                 Box(
                     Modifier
                         .fillMaxSize()
+                        .blockPointerInput()
                         .graphicsLayer {
                             val enter = slot.enter
                             val push = above?.enter ?: 0f

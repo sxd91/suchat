@@ -63,6 +63,7 @@ import io.github.sxd91.suchat.data.SampleData
 import io.github.sxd91.suchat.data.model.Message
 import io.github.sxd91.suchat.data.model.MessageType
 import io.github.sxd91.suchat.ui.component.SuchatAvatar
+import io.github.sxd91.suchat.ui.component.blockPointerInput
 import kotlinx.coroutines.delay
 import top.yukonga.miuix.kmp.basic.Icon as MiuixIcon
 import top.yukonga.miuix.kmp.basic.IconButton as MiuixIconButton
@@ -316,14 +317,19 @@ fun ChatDetailScreen(
             // 关闭过程中记住最后的面板，避免 AnimatedVisibility 出场时闪 None。
             val lastPanel = remember { mutableStateOf(PanelMode.Emoji) }
             if (panelMode != PanelMode.None) lastPanel.value = panelMode
-            Crossfade(
-                targetState = lastPanel.value,
-                animationSpec = tween(200),
-                label = "chat_panel",
-            ) { panel ->
-                when (panel) {
-                    PanelMode.Emoji -> EmojiPanel(onPick = { emoji -> inputText += emoji })
-                    else -> ExtensionPanel()
+            // ★ 2026-10-02 修「面板下面会穿透点击下层」：
+            //  面板本身只有子项 clickable，留白区不是命中目标 →
+            //  点击会穿到下面的消息列表。这里挂指针拦截兜底。
+            Box(Modifier.fillMaxWidth().blockPointerInput()) {
+                Crossfade(
+                    targetState = lastPanel.value,
+                    animationSpec = tween(200),
+                    label = "chat_panel",
+                ) { panel ->
+                    when (panel) {
+                        PanelMode.Emoji -> EmojiPanel(onPick = { emoji -> inputText += emoji })
+                        else -> ExtensionPanel()
+                    }
                 }
             }
         }

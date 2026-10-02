@@ -12,6 +12,9 @@ serialization = "1.11.0"
 # 既有数据层依赖（保留）
 coroutines = "1.9.0"
 datastore = "1.1.2"
+# Kyant backdrop（液态玻璃上游库；用户指定 https://github.com/Kyant0/AndroidLiquidGlass）
+kyant-backdrop = "2.0.1"
+kyant-shapes = "1.2.1"
 
 [libraries]
 # --- Compose ---
@@ -39,6 +42,17 @@ materialkolor = { module = "com.materialkolor:material-kolor", version.ref = "ma
 
 # --- kotlinx-serialization ---
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }
+
+# --- kyant backdrop（液态玻璃上游库） ---
+# 用户指定：https://github.com/Kyant0/AndroidLiquidGlass
+#  · 官方文档：https://kyant.gitbook.io/backdrop
+#  · 效果基于 RenderEffect → Android 12+；含 RuntimeShader 的效果需 Android 13+
+#    （本项目 minSdk = 33，全覆盖）
+#  · 效果顺序固定：colorFilter ⇒ blur ⇒ lens
+#  · 库不提供高层组件，只提供 Backdrop 能力 + drawBackdrop 修饰符
+kyant-backdrop = { module = "io.github.kyant0:backdrop", version.ref = "kyant-backdrop" }
+# ContinuousCapsule / Capsule 等连续圆角形状（lens 要求 shape 是 CornerBasedShape）
+kyant-shapes = { module = "io.github.kyant0:shapes", version.ref = "kyant-shapes" }
 
 # --- 既有数据层依赖（保留：SessionStore / ApiClient 在用） ---
 kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }

@@ -115,6 +115,12 @@ dependencies {
     // --- material-kolor（莫奈取色） ---
     implementation(libs.materialkolor)
 
+    // --- kyant backdrop（液态玻璃上游库；用户指定） ---
+    //  tab 栏 / 面板 / 滑块等按 Kyant 官方示例重写：
+    //  effects 顺序固定 colorFilter ⇒ blur ⇒ lens（见 kyant.gitbook.io/backdrop）
+    implementation(libs.kyant.backdrop)
+    implementation(libs.kyant.shapes)
+
     // --- kotlinx-serialization ---
     implementation(libs.kotlinx.serialization.json)
 

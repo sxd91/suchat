@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -39,7 +40,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -58,7 +58,7 @@ import top.yukonga.miuix.kmp.basic.Icon as MiuixIcon
 import top.yukonga.miuix.kmp.basic.IconButton as MiuixIconButton
 import top.yukonga.miuix.kmp.basic.Text as MiuixText
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-import kotlin.math.roundToInt
+import kotlin.math.abs
 
 /**
  * 联系人页。
@@ -271,8 +271,18 @@ fun ContactsScreen(
         Box(
             modifier = Modifier
                 .align(Alignment.CenterEnd)
-                .fillMaxHeight(0.62f)
+                // ★ 2026-10-02 修正（用户反馈「索引太大了、字母间隔太远、看不到鱼眼」）：
+                //
+                // 旧写法 `.fillMaxHeight(0.62f)` + `Arrangement.SpaceEvenly`：
+                // 索引条高 = 屏高 × 0.62 ≈ 1719px，26 个字母被**均匀撑满**，
+                // 每个字母间距 ≈ 66px（22.6dp）—— 既松弛又看不出放大。
+                //
+                // 现改为 **wrapContentHeight + 固定字母行高**：
+                // 总高 = 字母数 × [IndexItemHeight]（26 × 15dp = 390dp），
+                // 间距紧凑后，鱼眼的 1.9× 放大才真正看得见。
+                .wrapContentHeight()
                 .width(IndexBarWidth)
+                .padding(end = 2.dp)
                 .pointerInput(letters) {
                     // 滑动选字母（连续）。
                     detectDragGestures(
@@ -305,12 +315,12 @@ fun ContactsScreen(
         ) {
             Column(
                 modifier = Modifier
-                    .fillMaxHeight()
+                    .wrapContentHeight()
                     .width(IndexBarWidth)
                     .clip(RoundedCornerShape(IndexBarWidth / 2))
                     .background(c.surfaceContainerHigh.copy(alpha = 0.9f))
                     .onSizeChanged { barHeightPx = it.height.toFloat() },
-                verticalArrangement = Arrangement.SpaceEvenly,
+                verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 letters.forEachIndexed { index, letter ->
@@ -338,7 +348,29 @@ fun ContactsScreen(
 }
 
 /** 索引条宽。 */
-private val IndexBarWidth = 28.dp
+private val IndexBarWidth = 20.dp
+
+/**
+ * 单个字母的行高。
+ *
+ * ★ 2026-10-02 新增：鱼眼的**缩放锚点间距**就是它。
+ *
+ * ## 为什么必须显式给行高（不能用 SpaceEvenly）
+ *
+ * 旧写法靠 `fillMaxHeight(0.62f)` + `SpaceEvenly` 决定间距 —— 间距随屏幕尺寸
+ * 浮动（本机 ≈22.6dp），导致两个问题：
+ *  1. **太松**：26 个字母摊在 1719px 上，视觉上「间隔太远」；
+ *  2. **鱼眼失效**：`lensPitch = 条高/字母数` 变大后，
+ *     `fisheyeScale` 里 `distance = |index - lensPosition|`（单位=字母数）
+ *     虽然不受影响，但**视觉上**相邻字母隔得太开，1.9× 放大在 22.6dp 间距里
+ *     显得微不足道 —— 用户「看不到鱼眼效果」的真正原因。
+ *
+ * 固定 15dp：26 个字母 = 390dp，紧凑得像 iOS/微信的索引条，
+ * 放大倍数在紧密排列里一眼可见。
+ *
+ * 注：`wrapContentHeight` 需要子项有确定高度，否则退化为 0 —— 所以行高必须有。
+ */
+private val IndexItemHeight = 15.dp
 
 /**
  * 鱼眼影响半径（单位：**字母个数**，不是像素）。
@@ -421,9 +453,14 @@ private fun IndexLetter(
         fontSize = 10.sp,
         fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
         color = if (active) c.primary else c.onSurfaceSecondary,
-        modifier = Modifier.graphicsLayer {
-            scaleX = animatedScale
-            scaleY = animatedScale
-        },
+        modifier = Modifier
+            // 固定行高：给 wrapContentHeight 一个确定的总高，
+            // 同时保证每个字母的"缩放锚点"等距（鱼眼的 pitch 才稳定）。
+            .height(IndexItemHeight)
+            .wrapContentHeight(Alignment.CenterVertically)
+            .graphicsLayer {
+                scaleX = animatedScale
+                scaleY = animatedScale
+            },
     )
 }
