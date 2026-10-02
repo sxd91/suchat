@@ -23,6 +23,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
@@ -32,6 +33,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.roundToInt
 import io.github.sxd91.suchat.BuildConfig
+import io.github.sxd91.suchat.core.design.glass.kyant.LiquidSlider
+import io.github.sxd91.suchat.core.design.glass.kyant.LiquidToggle
+import io.github.sxd91.suchat.core.design.glass.kyant.rememberPageBackdropOrFallback
 import io.github.sxd91.suchat.core.design.icon.SuchatIcons
 import io.github.sxd91.suchat.core.design.theme.SuchatThemeDefaults
 import io.github.sxd91.suchat.core.nav.SuchatNavigator
@@ -44,8 +48,6 @@ import io.github.sxd91.suchat.ui.theme.SuchatAppearance
 import io.github.sxd91.suchat.ui.theme.SuchatThemeMode
 import top.yukonga.miuix.kmp.basic.Icon as MiuixIcon
 import top.yukonga.miuix.kmp.basic.ColorPicker as MiuixColorPicker
-import top.yukonga.miuix.kmp.basic.Slider as MiuixSlider
-import top.yukonga.miuix.kmp.basic.Switch as MiuixSwitch
 import top.yukonga.miuix.kmp.basic.Text as MiuixText
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -105,6 +107,9 @@ private fun SwitchRow(
     onCheckedChange: (Boolean) -> Unit,
 ) {
     val c = MiuixTheme.colorScheme
+    // ★ 2026-10-02：液态玻璃开关（Kyant backdrop 版）。
+    //   采样源从页面骨架 provide 的 LocalKyantBackdrop 取；未迁移页面回退纯色。
+    val backdrop = rememberPageBackdropOrFallback(c.surface)
     Column(modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
@@ -128,10 +133,11 @@ private fun SwitchRow(
                     )
                 }
             }
-            MiuixSwitch(
-                checked = checked,
-                onCheckedChange = { if (enabled) onCheckedChange(it) },
-                enabled = enabled,
+            LiquidToggle(
+                selected = { checked },
+                onSelect = { if (enabled) onCheckedChange(it) },
+                backdrop = backdrop,
+                modifier = Modifier.alpha(if (enabled) 1f else 0.4f),
             )
         }
         if (showDivider) {
@@ -287,12 +293,18 @@ private fun IntSliderRow(
                 color = c.onSurfaceSecondary,
             )
         }
-        MiuixSlider(
-            value = value.toFloat(),
+        // ★ 2026-10-02：液态玻璃滑块（Kyant backdrop 版）。
+        //   语义差异：上游滑块是连续拖拽（无 steps 吸附），这里保持连续 ——
+        //   原 miuix 版的「每 5% 一档」吸附去掉后拖动更顺滑；
+        //   数值仍按 roundToInt() 落盘，档位语义（100/105/...）不受影响。
+        LiquidSlider(
+            value = { value.toFloat() },
             onValueChange = { onValueChange(it.roundToInt()) },
             valueRange = min.toFloat()..max.toFloat(),
-            steps = (max - min) / 5 - 1, // 每 5% 一档
+            visibilityThreshold = 0.01f,
+            backdrop = rememberPageBackdropOrFallback(c.surface),
             modifier = Modifier.padding(horizontal = 20.dp),
+            label = title,
         )
         Spacer(Modifier.height(10.dp))
     }
@@ -523,13 +535,15 @@ fun TeenModeScreen(nav: SuchatNavigator, bottomInset: Dp = 0.dp) {
                         color = c.onSurfaceSecondary,
                     )
                     Spacer(Modifier.height(14.dp))
-                    MiuixSwitch(
-                        checked = enabled,
-                        onCheckedChange = {
+                    // ★ 2026-10-02：同样换为液态玻璃开关（Kyant）。
+                    LiquidToggle(
+                        selected = { enabled },
+                        onSelect = {
                             settings.setBool(BoolKey.TeenModeEnabled, it)
                             // 青少年模式下强制开启「关怀模式的大字」的相反项 —— 不联动，
                             // 只提示是否进入受限态；真实产品此处会走监护人验证。
                         },
+                        backdrop = rememberPageBackdropOrFallback(c.surface),
                     )
                 }
             }

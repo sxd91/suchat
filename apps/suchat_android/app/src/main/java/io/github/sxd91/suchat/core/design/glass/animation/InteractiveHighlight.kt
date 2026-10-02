@@ -71,6 +71,16 @@ class InteractiveHighlight(
     val offset: Offset get() = positionAnimation.value - startPosition
 
     /**
+     * 按压进度（0..1）—— 手指按下时弹簧升到 1，抬起回 0。
+     *
+     * ★ 2026-10-02 新增（移植 Kyant 控件时补齐）：
+     * 上游的 `InteractiveHighlight` 公开此属性，供按钮的
+     * 形变（鼓包/挤压）随按压程度联动；本文件此前只在内部
+     * `modifier` 绘制光斑时用，故补为公开只读属性。纯增量。
+     */
+    val pressProgress: Float get() = pressProgressAnimation.value
+
+    /**
      * AGSL 径向光斑。
      *
      * `smoothstep(radius, radius * 0.5, dist)` 的两个边界是**反的**（从大半径到小半径），

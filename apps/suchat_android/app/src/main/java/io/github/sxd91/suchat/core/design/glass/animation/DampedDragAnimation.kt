@@ -76,6 +76,17 @@ class DampedDragAnimation(
     val scaleY: Float get() = scaleYAnimation.value
     val velocity: Float get() = velocityAnimation.value
 
+    /**
+     * 归一化进度（0..1）—— 把 [value] 从 [valueRange] 映射到 [0, 1]。
+     *
+     * ★ 2026-10-02 新增（移植 Kyant 控件时补齐）：
+     * 上游的 `DampedDragAnimation` 有此属性，滑块用它换算滑块位置、
+     * 填充轨宽度；本文件此前只在内部用 `value`，故补上以对齐上游 API。
+     * 纯增量：不改变任何既有行为。
+     */
+    val progress: Float
+        get() = (value - valueRange.start) / (valueRange.endInclusive - valueRange.start)
+
     val modifier: Modifier = Modifier.pointerInput(Unit) {
         val touchSlopSquared = viewConfiguration.touchSlop.let { it * it }
         val longPressTimeoutMillis = viewConfiguration.longPressTimeoutMillis
