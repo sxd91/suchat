@@ -25,6 +25,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -32,6 +33,7 @@ import androidx.compose.ui.unit.sp
 import kotlin.math.roundToInt
 import io.github.sxd91.suchat.BuildConfig
 import io.github.sxd91.suchat.core.design.icon.SuchatIcons
+import io.github.sxd91.suchat.core.design.theme.SuchatThemeDefaults
 import io.github.sxd91.suchat.core.nav.SuchatNavigator
 import io.github.sxd91.suchat.core.nav.SuchatPage
 import io.github.sxd91.suchat.data.SampleData
@@ -41,6 +43,7 @@ import io.github.sxd91.suchat.ui.component.SuchatScaffold
 import io.github.sxd91.suchat.ui.theme.SuchatAppearance
 import io.github.sxd91.suchat.ui.theme.SuchatThemeMode
 import top.yukonga.miuix.kmp.basic.Icon as MiuixIcon
+import top.yukonga.miuix.kmp.basic.ColorPicker as MiuixColorPicker
 import top.yukonga.miuix.kmp.basic.Slider as MiuixSlider
 import top.yukonga.miuix.kmp.basic.Switch as MiuixSwitch
 import top.yukonga.miuix.kmp.basic.Text as MiuixText
@@ -998,8 +1001,14 @@ fun AppearanceScreen(
     val c = MiuixTheme.colorScheme
     val settings = LocalSuchatSettings.current ?: return
 
-    // 三个多选一的候选项。
+    // 候选项（全部为「值 to 显示文案」）。
     val themeOptions = listOf("System" to "跟随系统", "Light" to "浅色", "Dark" to "深色")
+    val colorSourceOptions = listOf(
+        "Wallpaper" to "背景取色（跟随壁纸）",
+        "Monet" to "莫奈取色（系统推荐）",
+        "Custom" to "自定义颜色",
+    )
+    val paletteOptions = SuchatThemeDefaults.paletteStyles.map { it.name to SuchatThemeDefaults.paletteLabel(it) }
     val glassOptions = listOf(
         "LiquidGlass" to "液态玻璃（完整折射）",
         "Blur" to "半透明毛玻璃",
@@ -1010,8 +1019,28 @@ fun AppearanceScreen(
         "Balanced" to "平衡",
         "Battery" to "省电",
     )
+    /**
+     * 页面转场（用户第 3 项：miuix / AOSP）。
+     *
+     * 契约 `docs/android-experience.md` 的 Transitions 一节规定：
+     *  1. 共享元素为默认；2. Miuix 转场可选；3. AOSP Material 转场可选；
+     *  4. 减少动态时替换为短淡化。
+     * 这里把 2/3/4 做成显式选项（此前 `ChoiceKey.Transition` 是死值，从未接 UI）。
+     */
+    val transitionOptions = listOf(
+        "Miuix" to "Miuix（默认）",
+        "AOSP" to "AOSP Material",
+        "Fade" to "淡化（无位移）",
+    )
 
-    var picker by remember { mutableStateOf<Pair<String, List<Pair<String, String>>>?>(null) }
+    // 当前打开的选择面板（key + 选项 + 当前值 + 选中回调）。
+    var pickerKey by remember { mutableStateOf<String?>(null) }
+
+    // 自定义取色器是否展开。
+    var showColorPicker by remember { mutableStateOf(false) }
+
+    val curColorSource = settings.choice(ChoiceKey.ColorSource)
+    val curPalette = settings.choice(ChoiceKey.PaletteStyle)
 
     SuchatScaffold(title = "外观", onBack = { nav.pop() }, bottomInset = bottomInset) { pad ->
         LazyColumn(
@@ -1023,28 +1052,107 @@ fun AppearanceScreen(
         ) {
             item(key = "hint") {
                 GroupGap()
-                SectionHint("以下设置由用户手动指定 —— 应用不会根据设备性能自动推断（契约 docs/android-experience.md）。")
+                SectionHint("配色跟随你的选择即时生效；「背景取色」会读取系统壁纸的颜色。")
             }
-            item(key = "choices") {
+
+            // ---------- 配色 ----------
+            item(key = "color") {
+                Column(Modifier.background(c.surface)) {
+                    ChoiceRow(
+                        title = "颜色来源",
+                        value = colorSourceOptions.first { it.first == curColorSource }.second,
+                        summary = when (curColorSource) {
+                            "Custom" -> "使用下方自选的颜色生成整套配色"
+                            else -> "整套配色随壁纸/系统变化"
+                        },
+                        onClick = { pickerKey = "color_source" },
+                    )
+                    ChoiceRow(
+                        title = "调色风格",
+                        value = paletteOptions.first { it.first == curPalette }.second,
+                        summary = "同一种子色可以调出不同气质",
+                        onClick = { pickerKey = "palette" },
+                    )
+                    // 只在「自定义颜色」下显示取色入口 —— 其余来源不看这个值。
+                    if (curColorSource == "Custom") {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { showColorPicker = !showColorPicker }
+                                .padding(horizontal = 20.dp)
+                                .height(56.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            MiuixText("自定义颜色", fontSize = 16.sp, color = c.onSurface, modifier = Modifier.weight(1f))
+                            // 当前色小圆点预览。
+                            Box(
+                                Modifier
+                                    .size(24.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(appearance.seedColor)),
+                            )
+                            MiuixIcon(
+                                imageVector = if (showColorPicker) SuchatIcons.ExpandLess else SuchatIcons.ExpandMore,
+                                contentDescription = null,
+                                tint = c.onSurfaceSecondary,
+                                modifier = Modifier.padding(start = 8.dp).size(18.dp),
+                            )
+                        }
+                        if (showColorPicker) {
+                            MiuixColorPicker(
+                                color = Color(settings.int(IntKey.SeedColor)),
+                                onColorChanged = { picked ->
+                                    val argb = picked.toArgb()
+                                    settings.setInt(IntKey.SeedColor, argb)
+                                    // ★ 即时生效：同步改运行时实例。
+                                    appearance.seedColor = argb
+                                    appearance.paletteStyleName = settings.choice(ChoiceKey.PaletteStyle)
+                                },
+                                modifier = Modifier.padding(horizontal = 20.dp),
+                            )
+                            Spacer(Modifier.height(8.dp))
+                        }
+                    }
+                }
+            }
+
+            // ---------- 显示 ----------
+            item(key = "display") {
+                GroupGap()
                 Column(Modifier.background(c.surface)) {
                     ChoiceRow(
                         title = "深浅色",
                         value = themeOptions.first { it.first == settings.choice(ChoiceKey.ThemeMode) }.second,
-                        onClick = { picker = "theme_mode" to themeOptions },
+                        onClick = { pickerKey = "theme_mode" },
                     )
                     ChoiceRow(
-                        title = "玻璃渲染",
-                        value = glassOptions.first { it.first == settings.choice(ChoiceKey.GlassMode) }.second,
-                        onClick = { picker = "glass_mode" to glassOptions },
-                    )
-                    ChoiceRow(
-                        title = "性能档位",
-                        value = perfOptions.first { it.first == settings.choice(ChoiceKey.Performance) }.second,
-                        onClick = { picker = "performance" to perfOptions },
+                        title = "页面转场",
+                        value = transitionOptions.first { it.first == settings.choice(ChoiceKey.Transition) }.second,
+                        summary = "二级/三级页面进入与返回的动画风格",
+                        onClick = { pickerKey = "transition" },
                         showDivider = false,
                     )
                 }
             }
+
+            // ---------- 玻璃与性能 ----------
+            item(key = "glass") {
+                GroupGap()
+                Column(Modifier.background(c.surface)) {
+                    ChoiceRow(
+                        title = "玻璃渲染",
+                        value = glassOptions.first { it.first == settings.choice(ChoiceKey.GlassMode) }.second,
+                        onClick = { pickerKey = "glass_mode" },
+                    )
+                    ChoiceRow(
+                        title = "性能档位",
+                        value = perfOptions.first { it.first == settings.choice(ChoiceKey.Performance) }.second,
+                        onClick = { pickerKey = "performance" },
+                        showDivider = false,
+                    )
+                }
+            }
+
             item(key = "motion") {
                 GroupGap()
                 Column(Modifier.background(c.surface)) {
@@ -1060,6 +1168,7 @@ fun AppearanceScreen(
                     )
                 }
             }
+
             item(key = "tab_scale") {
                 GroupGap()
                 Column(Modifier.background(c.surface)) {
@@ -1072,37 +1181,56 @@ fun AppearanceScreen(
                     )
                 }
             }
+
             item(key = "tail") { GroupGap(24.dp) }
         }
 
-        // 选择面板（底部弹出，与 miuix 的 ModalBottomSheet 观感一致）。
-        val current = picker
-        if (current != null) {
+        // ---------- 选择面板 ----------
+        val key = pickerKey
+        if (key != null) {
+            val (title, options, selected) = when (key) {
+                "color_source" -> Triple("颜色来源", colorSourceOptions, curColorSource)
+                "palette" -> Triple("调色风格", paletteOptions, curPalette)
+                "theme_mode" -> Triple(
+                    "深浅色", themeOptions, settings.choice(ChoiceKey.ThemeMode),
+                )
+                "transition" -> Triple(
+                    "页面转场", transitionOptions, settings.choice(ChoiceKey.Transition),
+                )
+                "glass_mode" -> Triple(
+                    "玻璃渲染", glassOptions, settings.choice(ChoiceKey.GlassMode),
+                )
+                else -> Triple(
+                    "性能档位", perfOptions, settings.choice(ChoiceKey.Performance),
+                )
+            }
             ChoiceSheet(
-                title = when (current.first) {
-                    "theme_mode" -> "深浅色"
-                    "glass_mode" -> "玻璃渲染"
-                    else -> "性能档位"
-                },
-                options = current.second,
-                selected = settings.choice(
-                    when (current.first) {
-                        "theme_mode" -> ChoiceKey.ThemeMode
-                        "glass_mode" -> ChoiceKey.GlassMode
-                        else -> ChoiceKey.Performance
-                    },
-                ),
-                onDismiss = { picker = null },
+                title = title,
+                options = options,
+                selected = selected,
+                onDismiss = { pickerKey = null },
                 onPick = { value ->
-                    when (current.first) {
+                    when (key) {
+                        "color_source" -> {
+                            settings.setChoice(ChoiceKey.ColorSource, value)
+                            // ★ 即时生效：主题层按 colorSource 决定用壁纸还是自选种子。
+                            appearance.colorSource = value
+                        }
+                        "palette" -> {
+                            settings.setChoice(ChoiceKey.PaletteStyle, value)
+                            appearance.paletteStyleName = value
+                        }
                         "theme_mode" -> {
                             settings.setChoice(ChoiceKey.ThemeMode, value)
-                            // ★ 即时生效：直接改写运行时的 appearance 实例。
                             appearance.themeMode = when (value) {
                                 "Light" -> SuchatThemeMode.Light
                                 "Dark" -> SuchatThemeMode.Dark
                                 else -> SuchatThemeMode.System
                             }
+                        }
+                        "transition" -> {
+                            settings.setChoice(ChoiceKey.Transition, value)
+                            appearance.transition = value
                         }
                         "glass_mode" -> {
                             settings.setChoice(ChoiceKey.GlassMode, value)
@@ -1113,7 +1241,7 @@ fun AppearanceScreen(
                             appearance.performance = value
                         }
                     }
-                    picker = null
+                    pickerKey = null
                 },
             )
         }

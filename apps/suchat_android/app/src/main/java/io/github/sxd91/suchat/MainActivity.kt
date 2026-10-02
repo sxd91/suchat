@@ -144,6 +144,40 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+/**
+ * 把持久化设置同步进运行时 [SuchatAppearance]。
+ *
+ * ## 为什么需要（否则「重启后设置失效」）
+ *
+ * [SuchatAppearance] 是**运行时**状态（可观察，驱动即时生效），
+ * 而设置值落在 SharedPreferences（[io.github.sxd91.suchat.ui.page.settings.SuchatSettings]）。
+ * 两者必须**启动时对齐一次** —— 否则用户上次选了「自定义颜色/深色/底栏 120%」，
+ * 重启后 [SuchatAppearance] 又回到构造默认值，界面与设置页显示不一致。
+ *
+ * 只在进入主界面前同步一次；之后由设置页的写入同时更新两处。
+ */
+@Composable
+private fun SyncAppearanceFromSettings(
+    appearance: SuchatAppearance,
+    settings: io.github.sxd91.suchat.ui.page.settings.SuchatSettings?,
+) {
+    LaunchedEffect(settings) {
+        val s = settings ?: return@LaunchedEffect
+        appearance.colorSource = s.choice(io.github.sxd91.suchat.ui.page.settings.ChoiceKey.ColorSource)
+        appearance.paletteStyleName = s.choice(io.github.sxd91.suchat.ui.page.settings.ChoiceKey.PaletteStyle)
+        appearance.seedColor = s.int(io.github.sxd91.suchat.ui.page.settings.IntKey.SeedColor)
+        appearance.glassMode = s.choice(io.github.sxd91.suchat.ui.page.settings.ChoiceKey.GlassMode)
+        appearance.performance = s.choice(io.github.sxd91.suchat.ui.page.settings.ChoiceKey.Performance)
+        appearance.transition = s.choice(io.github.sxd91.suchat.ui.page.settings.ChoiceKey.Transition)
+        appearance.reduceMotion = s.bool(io.github.sxd91.suchat.ui.page.settings.BoolKey.ReduceMotion)
+        appearance.themeMode = when (s.choice(io.github.sxd91.suchat.ui.page.settings.ChoiceKey.ThemeMode)) {
+            "Light" -> io.github.sxd91.suchat.ui.theme.SuchatThemeMode.Light
+            "Dark" -> io.github.sxd91.suchat.ui.theme.SuchatThemeMode.Dark
+            else -> io.github.sxd91.suchat.ui.theme.SuchatThemeMode.System
+        }
+    }
+}
+
 /** 会话状态：未连接 / 预览 / 已连接。 */
 private sealed interface AppSession {
     data object Preview : AppSession
@@ -171,6 +205,9 @@ private fun SuchatLauncher() {
     var session by remember { mutableStateOf<AppSession?>(null) }
     val appearance = remember { SuchatAppearance() }
     val settings = rememberSuchatSettings()
+
+    // 启动时把持久化设置回填进运行时实例（否则重启后设置「失效」）。
+    SyncAppearanceFromSettings(appearance, settings)
 
     SuchatRootTheme(appearance) {
         CompositionLocalProvider(LocalSuchatSettings provides settings) {
@@ -425,18 +462,37 @@ private fun PageLayerHost(
                         .graphicsLayer {
                             val enter = slot.enter
                             val push = above?.enter ?: 0f
-                            if (appearance.reduceMotion) {
-                                // 减少动态：不位移、不缩放，只用透明度过渡。
-                                translationX = 0f
-                                alpha = enter
-                            } else {
-                                // 自身入场位移（从右侧滑入）减去被上层推回的位移。
-                                translationX = size.width * (1f - enter) -
-                                    size.width * DEPTH_PARALLAX * push
-                                val scale = 1f - (1f - DEPTH_SCALE) * push
-                                scaleX = scale
-                                scaleY = scale
-                                alpha = 1f
+                            // ★ 2026-10-02：转场风格（设置 → 外观 → 页面转场）在此生效。
+                            //
+                            // 三种风格共用同一个 `enter` 进度，只在**如何映射到位移**上不同：
+                            //  · Miuix：横向滑动 + 底层退让（默认，最具层级感）
+                            //  · AOSP：Material 的纵向淡入 + 轻微上移（FadeThrough 观感）
+                            //  · Fade：纯透明度，无任何位移
+                            //
+                            // `reduceMotion` 优先级最高（契约：减少动态 → 短淡化）。
+                            val style = if (appearance.reduceMotion) "Fade" else appearance.transition
+                            when (style) {
+                                "Fade" -> {
+                                    translationX = 0f
+                                    translationY = 0f
+                                    alpha = enter
+                                }
+                                "AOSP" -> {
+                                    // Material 的「淡入上移」：位移量小（屏高 6%），
+                                    // 主要靠透明度建立层次。
+                                    translationX = 0f
+                                    translationY = size.height * 0.06f * (1f - enter)
+                                    alpha = enter
+                                }
+                                else -> {
+                                    // Miuix：横向滑入 + 上层推挤底层。
+                                    translationX = size.width * (1f - enter) -
+                                        size.width * DEPTH_PARALLAX * push
+                                    val scale = 1f - (1f - DEPTH_SCALE) * push
+                                    scaleX = scale
+                                    scaleY = scale
+                                    alpha = 1f
+                                }
                             }
                         },
                 ) {

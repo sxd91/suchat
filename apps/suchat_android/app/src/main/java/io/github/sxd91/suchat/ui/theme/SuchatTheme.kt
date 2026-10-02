@@ -49,9 +49,17 @@ class SuchatAppearance(
     themeMode: SuchatThemeMode = SuchatThemeMode.System,
     glassMode: String = "LiquidGlass",
     performance: String = "Full",
-    transition: String = "Shared Element",
+    transition: String = "Miuix",
     reduceMotion: Boolean = false,
-    colorSource: String = ColorSource.Monet.key,
+    /**
+     * 颜色来源。**默认必须是 `Wallpaper`** —— 这是「真·莫奈」：
+     * 读系统壁纸提取种子色，整套配色随壁纸变化。
+     *
+     * ⚠️ 2026-10-02 教训：上一版默认设成 `Monet` 且主题层走
+     * `ColorSchemeMode.System` + 品牌绿 —— 那等于**固定绿色**，
+     * 用户立刻发现「莫奈取色没了」。默认值必须与 [ColorSettingDefaults] 一致。
+     */
+    colorSource: String = "Wallpaper",
     seedColor: Int = SuchatThemeDefaults.SEED_ARGB,
     paletteStyleName: String = "TonalSpot",
 ) {

@@ -163,25 +163,35 @@ enum class ChoiceKey(val id: String, val default: String) {
 
     /** 字体大小档。 */
     FontScale("set_font_scale", "标准"),
+
+    // --- 外观（2026-10-02 新增：颜色来源 / 调色风格） ---
+
+    /**
+     * 颜色来源：`Wallpaper`（背景取色·默认）/ `Monet`（莫奈取色）/ `Custom`（自定义）。
+     *
+     * ⚠️ 默认必须是 **Wallpaper**：这是「真·莫奈」——读系统壁纸提取种子色。
+     * 上一版默认用了 `Monet` 且走 `ColorSchemeMode.System`（用品牌绿），
+     * 导致整套配色退化成固定绿、用户体感「莫奈取色没了」。
+     */
+    ColorSource("set_color_source", "Wallpaper"),
+
+    /** 调色风格（TonalSpot / Vibrant / Expressive / … 共 9 种）。 */
+    PaletteStyle("set_palette_style", "TonalSpot"),
 }
 
-/** 数值设置项（整数百分比）。 */
+/** 整数设置项（带范围）。 */
 enum class IntKey(val id: String, val default: Int, val min: Int, val max: Int) {
-    /**
-     * 底栏缩放（对齐 WeKit 的 `nav_bar_scale`，50–150%，默认 100）。
-     *
-     * ## 为什么是「覆盖 LocalDensity」而不是 graphicsLayer 缩放
-     *
-     * WeKit 的做法（`ReplaceNavigationBar.kt:648-651`）：
-     * ```
-     * val scaledDensity = Density(baseDensity.density * barScale, baseDensity.fontScale)
-     * CompositionLocalProvider(LocalDensity provides scaledDensity) { FloatingBottomBar(...) }
-     * ```
-     * 这样底栏内部**每一个 dp/sp**（高度、图标、胶囊、模糊半径、阴影）都按新尺寸
-     * **重新布局**，而不是被整体拉伸栅格化 —— 玻璃纹理保持清晰、触摸区与所见一致。
-     * 用 `graphicsLayer { scaleX/scaleY }` 会把已渲染的位图放大，玻璃会糊。
-     */
+    /** 底栏缩放（对齐 WeKit 的 `nav_bar_scale`，50–150%，默认 100）。 */
     TabBarScale("set_tab_bar_scale", 100, 50, 150),
+
+    /**
+     * 自定义种子色（ARGB Int）。
+     *
+     * 用 Int 而不是 Compose 的 `Color`：`Color` 是 inline value class，
+     * 落盘/读取都不如 Int 直接，且 SharedPreferences 原生只支持基本类型。
+     * 默认值 = 品牌绿 `0xFF07C160`。
+     */
+    SeedColor("set_seed_color", 0xFF07C160.toInt(), Int.MIN_VALUE, Int.MAX_VALUE),
 }
 
 /** 设置项 CompositionLocal（全树共享同一实例）。 */

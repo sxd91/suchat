@@ -11,6 +11,7 @@ import androidx.compose.ui.graphics.Color
 import com.materialkolor.PaletteStyle
 import com.materialkolor.dynamiccolor.ColorSpec
 import com.materialkolor.rememberDynamicColorScheme
+import io.github.sxd91.suchat.ui.theme.ColorSource
 import io.github.sxd91.suchat.ui.theme.SuchatAppearance
 import io.github.sxd91.suchat.ui.theme.SuchatThemeMode
 import top.yukonga.miuix.kmp.theme.ColorSchemeMode
@@ -60,18 +61,30 @@ fun SuchatRootTheme(
         SuchatThemeMode.Dark -> true
     }
 
-    // ★ 2026-10-02 修正（用户反馈「外观选不了莫奈取色的颜色和启用背景取色」）：
+    // ★★ 2026-10-02 重要修正（用户反馈「莫奈取色怎么没了，改得太猎奇」）★★
     //
-    // 旧实现把「种子色 = 品牌绿」「模式 = MonetSystem」**硬编码**在这里，
-    // 所以设置页无论怎么改都不可能影响配色 —— 用户说「太敷衍」。
+    // ## 我上一版把默认配色改坏了
     //
-    // 现在三个维度全部由 [SuchatAppearance] 驱动（改完即时生效）：
-    //  1. **颜色来源**（colorSource）：
-    //     · Monet / Custom → 用 appearance.seedColor 作种子色
-    //     · Wallpaper     → 用系统壁纸提取的色（由 miuix 的 MonetSystem 模式完成）
-    //  2. **种子色**（seedColor）：自定义颜色时的具体色值
-    //  3. **调色风格**（paletteStyleName）：TonalSpot / Vibrant / Expressive / …
-    val wallpaperMode = appearance.colorSource == "Wallpaper"
+    // 原版（e489614 起一直如此）是：
+    // ```
+    // colorSchemeMode = ColorSchemeMode.MonetSystem,  // ← 读系统壁纸取色 = 真·莫奈
+    // keyColor = 品牌绿,                                // ← Monet 模式下它只是 fallback
+    // ```
+    // 我上一版改成「默认走 `ColorSchemeMode.System` + 品牌绿当种子」——
+    // `System` 模式**不读壁纸**，直接用 keyColor 生成配色，
+    // 于是整套配色从「跟随壁纸」退化成「固定绿」= **莫奈取色消失**。
+    //
+    // ## 现在的正确逻辑
+    //
+    // | 颜色来源 | miuix 模式 | 种子色来源 |
+    // |---|---|---|
+    // | **Wallpaper（背景取色，默认）** | `MonetSystem` | **系统壁纸**（真·莫奈） |
+    // | Monet（莫奈取色） | `MonetSystem` | 系统壁纸（同上一档，保持兼容） |
+    // | Custom（自定义颜色） | `System` | 用户选定的 `seedColor` |
+    //
+    // 即：**默认必须回到 `MonetSystem`**，只有用户显式选「自定义颜色」时才用自选种子。
+    val colorSource = appearance.colorSource
+    val useSystemSeed = colorSource != ColorSource.Custom.key
     val paletteStyle = SuchatThemeDefaults.paletteStyleOf(appearance.paletteStyleName)
     val seed = Color(appearance.seedColor)
 
@@ -95,9 +108,8 @@ fun SuchatRootTheme(
             paletteStyle = paletteStyle,
             colorSpec = SuchatThemeDefaults.colorSpec,
             seedColor = seed,
-            // 「背景取色」交给 miuix 的 Monet 模式（读系统壁纸/取色服务）；
-            // 其余情况用「按种子色生成」的半莫奈模式。
-            monetFromSystem = wallpaperMode,
+            // true = 用系统壁纸取色（真·莫奈）；false = 用用户自选种子色。
+            monetFromSystem = useSystemSeed,
         ) {
             CompositionLocalProvider(
                 LocalSuchatTokens provides tokens,
