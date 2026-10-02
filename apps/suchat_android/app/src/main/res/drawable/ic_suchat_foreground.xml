@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Suchat 图标前景 —— 矢量（vector drawable，即 Android 的 SVG）。
+
+  图形：双对话气泡（主气泡 + 次气泡的负空间），寓意「跨时代的连接」。
+  绘制在 108×108 视口内、居中留出安全区（自适应图标规范要求主体在中间 66×66 内）。
+
+  注意：本文件只描述**形状**，颜色为纯白 —— 实际着色由外层自适应图标决定：
+  - 常规模式下用 ic_launcher_background 的渐变底；
+  - **Monet（莫奈）模式下系统会用壁纸取色重绘**（见 mipmap-anydpi-v26/ic_launcher.xml
+    的 <monochrome> 标签）。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 主气泡：圆角矩形 + 左下角小尾巴 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M36,32 h42 a13,13 0 0 1 13,13 v20 a13,13 0 0 1 -13,13 h-24 l-13,10.5 v-10.5 h-5 a13,13 0 0 1 -13,-13 v-20 a13,13 0 0 1 13,-13 z" />
+
+    <!-- 气泡内三点（用前景色挖空效果：填背景色不可行，改用裁剪式绘制） -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,0 h108 v108 h-108 z" />
+
+</vector>

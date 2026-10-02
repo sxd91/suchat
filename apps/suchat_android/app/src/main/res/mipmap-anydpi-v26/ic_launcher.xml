@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Suchat 自适应图标。
+
+  ## 三个标签的作用
+
+  - <background>：底色（渐变，见 drawable/ic_suchat_background.xml）；
+  - <foreground>：前景图形（矢量气泡）；
+  - <monochrome>：**莫奈取色入口** —— Android 13+ 在「主题图标」开启时，
+    会用**壁纸派生的单色**填充这个图形（用户第 4 条要求的正是这个）。
+
+  ## 为什么 monochrome 单独一个文件
+
+  单色版必须是实心剪影（内部细节会被单色填糊），所以不能直接复用彩色前景。
+  详见 drawable/ic_suchat_monochrome.xml 的注释。
+-->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@drawable/ic_suchat_background" />
+    <foreground android:drawable="@drawable/ic_suchat_foreground" />
+    <monochrome android:drawable="@drawable/ic_suchat_monochrome" />
+</adaptive-icon>

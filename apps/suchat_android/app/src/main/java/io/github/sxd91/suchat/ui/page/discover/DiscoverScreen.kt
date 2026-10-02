@@ -13,98 +13,93 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import io.github.sxd91.suchat.core.design.theme.LocalSuchatTokens
+import io.github.sxd91.suchat.core.design.icon.SuchatIcons
 import io.github.sxd91.suchat.core.nav.SuchatNavigator
 import io.github.sxd91.suchat.core.nav.SuchatPage
-import io.github.sxd91.suchat.data.SampleData
-import io.github.sxd91.suchat.ui.component.EntryRow
+import io.github.sxd91.suchat.ui.component.SuchatEntryRow
+import top.yukonga.miuix.kmp.basic.Text as MiuixText
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
- * 「发现」tab。
+ * 发现页。
  *
- * 微信结构：几个白色分组，组内每行「彩色图标 + 标题 + 右箭头」，
- * 分组之间用浅灰间隔（8dp）。
+ * ## 契约要求
  *
- * ```
- * [ 朋友圈                       ]   ← 第一组（单行）
- * ────────────────────────────
- * [ 视频号                       ]   ← 第二组（视频号 / 直播）
- * ────────────────────────────
- * [ 扫一扫 ][ 摇一摇            ]   ← 第三组
- * [ 看一看 ][ 搜一搜            ]
- * ────────────────────────────
- * [ 购物 ][ 游戏                ]   ← 第四组（占位）
- * ```
+ * 「发现 contains 朋友圈 and 漂流瓶」—— 这两项排在首位。
+ *
+ * ## 本轮修正（用户第 3、6 条）
+ *
+ * 图标从 emoji（◉ / ▶ / 📡…）换成 **miuix 矢量图标**（见 [SuchatIcons]），
+ * 并**去掉彩色色块背板**（图标直接着主题色，透明底）。
  */
 @Composable
 fun DiscoverScreen(
     nav: SuchatNavigator,
-    bottomInset: androidx.compose.ui.unit.Dp = 0.dp,
+    bottomInset: Dp = 0.dp,
 ) {
-    val colors = LocalSuchatTokens.current
+    val c = MiuixTheme.colorScheme
     val statusBarPadding = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
 
-    // 按「分组」组织条目：每个子列表是一组，组间留灰缝。
-    val groups = remember {
+    // 分组：每组是 (标题, 图标, 路由) 的列表。
+    val groups: List<List<Triple<String, ImageVector, SuchatPage?>>> = listOf(
+        // 组 1：朋友圈 + 漂流瓶（契约核心）
         listOf(
-            // 组 1：朋友圈 + 漂流瓶（契约明确要求：发现 contains 朋友圈 and 漂流瓶）
-            listOf(
-                Triple("朋友圈", 0xFF3F7FBF, "◉"),
-                Triple("漂流瓶", 0xFF2E8B9E, "🍾"),
-            ),
-            // 组 2：视频号 / 直播
-            listOf(
-                Triple("视频号", 0xFFF9961D, "▶"),
-                Triple("直播", 0xFFFF5636, "📡"),
-            ),
-            // 组 3：扫一扫 / 摇一摇 / 看一看 / 搜一搜
-            listOf(
-                Triple("扫一扫", 0xFF006BED, "⊞"),
-                Triple("摇一摇", 0xFF2988EE, "📳"),
-                Triple("看一看", 0xFFFEC206, "☰"),
-                Triple("搜一搜", 0xFFF83734, "⌕"),
-            ),
-            // 组 4：购物 / 游戏（占位）
-            listOf(
-                Triple("购物", 0xFFFA5151, "🛒"),
-                Triple("游戏", 0xFF07C160, "🎮"),
-            ),
-            // 组 5：小程序
-            listOf(Triple("小程序", 0xFF343BEE, "⬡")),
-        )
-    }
+            Triple("朋友圈", SuchatIcons.Moments, SuchatPage.Moments),
+            Triple("漂流瓶", SuchatIcons.DriftBottle, SuchatPage.DriftBottle),
+        ),
+        // 组 2：视频号 / 直播
+        listOf(
+            Triple("视频号", SuchatIcons.Channels, SuchatPage.Channels),
+            Triple("直播", SuchatIcons.Live, SuchatPage.Channels),
+        ),
+        // 组 3：扫一扫 / 摇一摇 / 看一看 / 搜一搜
+        listOf(
+            Triple("扫一扫", SuchatIcons.Scan, SuchatPage.Scan),
+            Triple("摇一摇", SuchatIcons.Shake, SuchatPage.Scan),
+            Triple("看一看", SuchatIcons.TopStories, SuchatPage.TopStories),
+            Triple("搜一搜", SuchatIcons.SearchDiscover, SuchatPage.SearchDiscover),
+        ),
+        // 组 4：购物 / 游戏
+        listOf(
+            Triple("购物", SuchatIcons.Shopping, null),
+            Triple("游戏", SuchatIcons.Games, null),
+        ),
+        // 组 5：小程序
+        listOf(
+            Triple("小程序", SuchatIcons.MiniPrograms, SuchatPage.MiniPrograms),
+        ),
+    )
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(colors.pageBackground),
+            .background(c.surface),
     ) {
-        // --- 顶栏（发现页无左右操作，仅标题） ---
+        // 顶栏（发现页无左右操作）。
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = statusBarPadding)
                 .height(48.dp)
-                .background(colors.topBar),
+                .background(c.surfaceContainer),
             contentAlignment = Alignment.Center,
         ) {
-            Text(
+            MiuixText(
                 text = "发现",
                 fontSize = 17.sp,
-                fontWeight = FontWeight.Medium,
-                color = colors.textPrimary,
+                fontWeight = FontWeight.SemiBold,
+                color = c.onSurface,
             )
         }
 
-        // --- 分组列表 ---
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = bottomInset),
@@ -116,27 +111,14 @@ fun DiscoverScreen(
                             Modifier
                                 .fillMaxWidth()
                                 .height(8.dp)
-                                .background(colors.pageBackground),
+                                .background(c.surfaceContainer),
                         )
-                        Column(Modifier.background(colors.cardBackground)) {
-                            group.forEachIndexed { rowIndex, (title, colorHex, glyph) ->
-                                EntryRow(
+                        Column(Modifier.background(c.surface)) {
+                            group.forEachIndexed { rowIndex, (title, icon, page) ->
+                                SuchatEntryRow(
                                     title = title,
-                                    iconColor = androidx.compose.ui.graphics.Color(colorHex),
-                                    glyph = glyph,
-                                    onClick = {
-                                        val page = when (title) {
-                                            "朋友圈" -> SuchatPage.Moments
-                                            "漂流瓶" -> SuchatPage.DriftBottle
-                                            "视频号" -> SuchatPage.Channels
-                                            "扫一扫" -> SuchatPage.Scan
-                                            "看一看" -> SuchatPage.TopStories
-                                            "搜一搜" -> SuchatPage.SearchDiscover
-                                            "小程序" -> SuchatPage.MiniPrograms
-                                            else -> null
-                                        }
-                                        if (page != null) nav.push(page)
-                                    },
+                                    icon = icon,
+                                    onClick = page?.let { p -> { nav.push(p) } },
                                     showDivider = rowIndex != group.lastIndex,
                                 )
                             }
@@ -144,12 +126,12 @@ fun DiscoverScreen(
                     }
                 }
             }
-            item(key = "discover_footer") {
-                Box(
+            item(key = "footer") {
+                Spacer(
                     Modifier
                         .fillMaxWidth()
                         .height(8.dp)
-                        .background(colors.pageBackground),
+                        .background(c.surfaceContainer),
                 )
             }
         }

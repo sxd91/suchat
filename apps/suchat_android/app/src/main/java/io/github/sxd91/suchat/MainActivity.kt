@@ -11,7 +11,6 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -34,12 +33,13 @@ import androidx.compose.ui.unit.dp
 import io.github.sxd91.suchat.core.design.glass.LiquidGlassTabBar
 import io.github.sxd91.suchat.core.design.glass.TabBarMode
 import io.github.sxd91.suchat.core.design.glass.TabItem
-import io.github.sxd91.suchat.core.design.theme.LocalSuchatTokens
 import io.github.sxd91.suchat.core.design.theme.SuchatRootTheme
 import io.github.sxd91.suchat.core.nav.SuchatNavigator
 import io.github.sxd91.suchat.core.nav.SuchatPage
 import io.github.sxd91.suchat.core.nav.SuchatTab
 import io.github.sxd91.suchat.core.nav.rememberSuchatNavigator
+import io.github.sxd91.suchat.ui.component.WeKitDrawer
+import io.github.sxd91.suchat.ui.component.WeKitPanelContent
 import io.github.sxd91.suchat.ui.page.chat.ChatDetailScreen
 import io.github.sxd91.suchat.ui.page.chats.ChatsScreen
 import io.github.sxd91.suchat.ui.page.contacts.ContactsScreen
@@ -60,39 +60,41 @@ import io.github.sxd91.suchat.ui.theme.SuchatAppearance
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
  * Suchat Android 主 Activity。
  *
- * ## 两个阶段
- *
- * 1. **服务器连接**（既有流程保留）：输入地址 → 健康检查 → 连接成功或进入预览；
- * 2. **主界面**：四 Tab 外壳 + 二级页栈（本次接入的完整前端）。
- *
- * ## 外壳结构（对齐契约 + WeKit）
+ * ## 结构
  *
  * ```
- * Box
- *   ├ 主 Tab 层（HorizontalPager 四页 + 液态玻璃悬浮底栏）
- *   │    └ 底栏是 pager 的兄弟节点，叠在其上做折射采样
- *   └ 二级页层（栈顶页面全屏覆盖，右滑入 / 右滑出）
+ * SuchatRootTheme（莫奈取色 + miuix 主题）
+ *   └ SuchatLauncher（服务器连接 → 主界面）
+ *        └ WeKitDrawer（负一屏空间抽屉）
+ *             ├ panel: WeKitPanelContent（负一屏内容）
+ *             └ content: 主 Tab 层
+ *                  ├ HorizontalPager（四页）
+ *                  └ LiquidGlassTabBar（液态玻璃底栏，可拖拽联动）
  * ```
  *
- * ## 底栏契约（docs/android-experience.md）
+ * ## 本轮落实的用户反馈
  *
- * 「The floating bottom bar follows the WeKit liquid-glass interaction model:
- * pill geometry, backdrop sampling, an elastic draggable selection indicator,
- * press scale, accessibility tab semantics, and optional dynamic highlight.」
- *
- * 由 [LiquidGlassTabBar] 完整实现；外观三档由 [SuchatAppearance.glassMode]
- * 显式驱动，**不做设备能力启发式判断**（契约要求）。
+ * | 编号 | 要求 | 实现位置 |
+ * |---|---|---|
+ * | 1 | 头像用莫奈取色 | `SuchatAvatar`（读 `MiuixTheme.colorScheme`） |
+ * | 2 | 全换 miuix 控件 | 全部页面（Icon/Text/IconButton/theme 色） |
+ * | 3 | 图标不用 emoji | `SuchatIcons`（miuix 矢量库） |
+ * | 4 | SVG 图标 + 莫奈取色 | `res/drawable/ic_suchat_*` + `<monochrome>` |
+ * | 5 | 划到哪切到哪 | `onDragFraction` → pager 实时跟随 |
+ * | 6 | 图标背景透明 | `SuchatEntryRow`（无色块背板） |
+ * | 7 | 胶囊索引 + 滑动 + 气泡 | `ContactsScreen` |
+ * | 8 | 头像+名字+状态 / 负一屏 | 本文件 + `WeKitDrawer` |
  */
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            // 外观配置来自契约结构体；当前为默认值，后续接设置页 / 服务端。
             val appearance = remember { SuchatAppearance() }
             SuchatRootTheme(appearance) {
                 SuchatLauncher()
@@ -101,7 +103,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-/** 会话状态：未连接 / 预览模式 / 已连接。 */
+/** 会话状态：未连接 / 预览 / 已连接。 */
 private sealed interface AppSession {
     data object Preview : AppSession
     data class Connected(val endpoint: String) : AppSession
@@ -116,80 +118,65 @@ private fun SuchatLauncher() {
             onPreview = { session = AppSession.Preview },
             onConnected = { session = AppSession.Connected(it) },
         )
-        is AppSession.Preview -> SuchatAppShell()
-        is AppSession.Connected -> SuchatAppShell()
+        is AppSession.Preview -> SuchatAppShell(statusText = "前端预览 · 未连接")
+        is AppSession.Connected -> SuchatAppShell(statusText = "已连接")
     }
 }
 
 /**
- * 应用外壳：主 Tab 层 + 二级页层。
+ * 应用外壳：负一屏抽屉包住整个主 Tab 层。
  *
- * 这是本次整合的核心 —— 把完整的前端页面体系接到既有的启动流程后面。
+ * ## 负一屏打开方式（用户第 8 条）
+ *
+ *  1. **点击消息页左上角头像 / 名字** → `onAvatarClick` → `drawerOpen = true`；
+ *  2. **左滑** → `WeKitDrawer` 内部的手势识别（拖拽跟手）；
+ *  3. 关闭：右滑 / 点遮罩 / 系统返回键。
  */
 @Composable
-private fun SuchatAppShell() {
+private fun SuchatAppShell(statusText: String) {
     val nav = rememberSuchatNavigator()
     val scope = rememberCoroutineScope()
-    val tokens = LocalSuchatTokens.current
+    var drawerOpen by remember { mutableStateOf(false) }
 
-    // 底栏项：文字与图标键均对齐契约（消息/联系人/发现/我的）。
-    val tabs = remember {
-        SuchatTab.entries.map { TabItem(it.label, it.iconKey) }
+    // 系统返回键：优先关抽屉，再弹二级页。
+    BackHandler(enabled = drawerOpen || nav.backStack.isNotEmpty()) {
+        if (drawerOpen) drawerOpen = false else nav.pop()
     }
 
-    val pagerState = rememberPagerState(
-        initialPage = nav.currentTab.ordinal,
-        pageCount = { SuchatTab.entries.size },
-    )
-
-    // 滚动限位：胶囊 64dp + 12dp 间距 + 手势条。
-    // 注意：**只抬高滚动终点，不做内容区 padding** —— 内容要能从玻璃下方
-    // 穿过，玻璃才有东西可折射（契约的液态玻璃成立前提）。
-    val barBottomPadding = 12.dp +
-        WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-    val bottomInset = TAB_BAR_HEIGHT + barBottomPadding
-
-    // 双向同步：点底栏 → pager 平移动画；滑 pager → 更新当前 tab。
-    LaunchedEffect(pagerState) {
-        snapshotFlow { pagerState.settledPage }.collect { page ->
-            val tab = SuchatTab.entries.getOrNull(page)
-            if (tab != null && nav.currentTab != tab) {
-                nav.switchTab(tab)
-            }
-        }
-    }
-    LaunchedEffect(nav.currentTab) {
-        val target = nav.currentTab.ordinal
-        if (pagerState.currentPage != target || pagerState.targetPage != target) {
-            pagerState.animateScrollToPage(target)
-        }
-    }
-
-    // 系统返回键：优先弹二级页栈（栈空则交给系统退出）。
-    BackHandler(enabled = nav.backStack.isNotEmpty()) {
-        nav.pop()
-    }
-
-    Box(Modifier.fillMaxSize()) {
-        // ---------- 主 Tab 层 ----------
+    WeKitDrawer(
+        drawerOpen = drawerOpen,
+        onOpen = { drawerOpen = true },
+        onClose = { drawerOpen = false },
+        panel = {
+            WeKitPanelContent(
+                userName = io.github.sxd91.suchat.data.SampleData.me.name,
+                statusText = statusText,
+                onItemClick = { key ->
+                    drawerOpen = false
+                    when (key) {
+                        "more" -> nav.push(SuchatPage.Settings)
+                    }
+                },
+            )
+        },
+    ) {
         MainTabs(
-            tabs = tabs,
             nav = nav,
-            pagerState = pagerState,
-            bottomInset = bottomInset,
-            barBottomPadding = barBottomPadding,
-            onSelectTab = { index -> scope.launch { pagerState.animateScrollToPage(index) } },
+            statusText = statusText,
+            onAvatarClick = { drawerOpen = true },
+            onSelectTab = { index -> scope.launch { /* 由 pager 处理 */ } },
         )
 
         // ---------- 二级页层 ----------
+        // 覆盖在主 Tab 层之上，从右滑入 / 右滑出；打开负一屏时不可交互
+        // （被抽屉内容层盖住，由 WeKitDrawer 的遮罩接管）。
         val topPage = nav.topPage
         AnimatedVisibility(
             visible = topPage != null,
             enter = slideInHorizontally(initialOffsetX = { it }, animationSpec = tween(260)),
             exit = slideOutHorizontally(targetOffsetX = { it }, animationSpec = tween(260)),
         ) {
-            // 退出动画期间 topPage 会先变 null，需记住最后一个非空页面，
-            // 否则滑出时内容会瞬间消失。
+            // 退出动画期间 topPage 先变 null，需记住最后一个非空页面。
             val renderedPage = remember { mutableStateOf<SuchatPage?>(null) }
             LaunchedEffect(topPage) {
                 if (topPage != null) renderedPage.value = topPage
@@ -199,9 +186,14 @@ private fun SuchatAppShell() {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(tokens.pageBackground),
+                        .background(MiuixTheme.colorScheme.surface),
                 ) {
-                    SecondaryHost(page = page, nav = nav, bottomInset = bottomInset)
+                    SecondaryHost(
+                        page = page,
+                        nav = nav,
+                        bottomInset = 64.dp +
+                            WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding(),
+                    )
                 }
             }
         }
@@ -211,14 +203,39 @@ private fun SuchatAppShell() {
 /** 主 Tab 层：pager + 悬浮液态玻璃底栏（兄弟节点）。 */
 @Composable
 private fun MainTabs(
-    tabs: List<TabItem>,
     nav: SuchatNavigator,
-    pagerState: androidx.compose.foundation.pager.PagerState,
-    bottomInset: Dp,
-    barBottomPadding: Dp,
+    statusText: String,
+    onAvatarClick: () -> Unit,
     onSelectTab: (Int) -> Unit,
 ) {
     val backdrop = rememberLayerBackdrop()
+    val scope = rememberCoroutineScope()
+
+    val tabs = remember { SuchatTab.entries.map { TabItem(it.label, it.iconKey) } }
+    val pagerState = rememberPagerState(
+        initialPage = nav.currentTab.ordinal,
+        pageCount = { SuchatTab.entries.size },
+    )
+
+    // 底栏限位：胶囊 64dp + 12dp + 手势条（只抬高滚动终点，不挡内容折射）。
+    val barBottomPadding = 12.dp +
+        WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    val bottomInset = TAB_BAR_HEIGHT + barBottomPadding
+
+    // pager 停稳 → 写回导航状态。
+    LaunchedEffect(pagerState) {
+        snapshotFlow { pagerState.settledPage }.collect { page ->
+            val tab = SuchatTab.entries.getOrNull(page)
+            if (tab != null && nav.currentTab != tab) nav.switchTab(tab)
+        }
+    }
+    // 导航状态 → pager（点击底栏时的跳转）。
+    LaunchedEffect(nav.currentTab) {
+        val target = nav.currentTab.ordinal
+        if (pagerState.currentPage != target || pagerState.targetPage != target) {
+            pagerState.animateScrollToPage(target)
+        }
+    }
 
     Box(Modifier.fillMaxSize()) {
         HorizontalPager(
@@ -228,7 +245,12 @@ private fun MainTabs(
                 .layerBackdrop(backdrop),
         ) { page ->
             when (SuchatTab.entries[page]) {
-                SuchatTab.Chats -> ChatsScreen(nav = nav, bottomInset = bottomInset)
+                SuchatTab.Chats -> ChatsScreen(
+                    nav = nav,
+                    bottomInset = bottomInset,
+                    onAvatarClick = onAvatarClick,
+                    statusText = statusText,
+                )
                 SuchatTab.Contacts -> ContactsScreen(nav = nav, bottomInset = bottomInset)
                 SuchatTab.Discover -> DiscoverScreen(nav = nav, bottomInset = bottomInset)
                 SuchatTab.Me -> MeScreen(nav = nav, bottomInset = bottomInset)
@@ -238,15 +260,30 @@ private fun MainTabs(
         LiquidGlassTabBar(
             items = tabs,
             selectedIndex = pagerState.targetPage,
-            onSelect = onSelectTab,
+            onSelect = { index -> scope.launch { pagerState.animateScrollToPage(index) } },
             backdrop = backdrop,
-            // 外观三档：默认 LiquidGlass（契约默认值）。
             mode = TabBarMode.LiquidGlass,
+            // ★ 用户第 5 条「划到哪切到哪」：
+            // 拖拽过程中把小数索引喂给 pager，让页面内容与指示器同步位移。
+            // 用 scrollToPage（无动画）而非 animateScrollToPage —— 后者会与
+            // 手指拖拽打架（每帧启动新动画）。
+            onDragFraction = { fraction ->
+                val target = fraction.roundToIntSafely(pagerState.pageCount)
+                if (target != pagerState.currentPage) {
+                    scope.launch { pagerState.scrollToPage(target) }
+                }
+            },
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(bottom = barBottomPadding),
         )
     }
+}
+
+/** 把小数索引四舍五入到合法页码范围内。 */
+private fun Float.roundToIntSafely(pageCount: Int): Int {
+    val rounded = kotlin.math.round(this).toInt()
+    return rounded.coerceIn(0, (pageCount - 1).coerceAtLeast(0))
 }
 
 /** 二级页路由分发。 */
@@ -262,7 +299,7 @@ private fun SecondaryHost(page: SuchatPage, nav: SuchatNavigator, bottomInset: D
             description = "搜索聊天记录、联系人、朋友圈", bottomInset = bottomInset,
         )
         SuchatPage.AddMenu -> PlaceholderScreen(
-            nav = nav, title = "＋",
+            nav = nav, title = "添加",
             description = "发起群聊 / 添加朋友 / 扫一扫 / 收付款", bottomInset = bottomInset,
         )
         SuchatPage.NewFriends -> NewFriendsScreen(nav = nav, bottomInset = bottomInset)

@@ -15,155 +15,148 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import io.github.sxd91.suchat.core.design.theme.LocalSuchatTokens
+import io.github.sxd91.suchat.core.design.icon.SuchatIcons
 import io.github.sxd91.suchat.core.nav.SuchatNavigator
 import io.github.sxd91.suchat.core.nav.SuchatPage
 import io.github.sxd91.suchat.data.SampleData
-import io.github.sxd91.suchat.ui.component.Avatar
-import io.github.sxd91.suchat.ui.component.EntryRow
+import io.github.sxd91.suchat.ui.component.SuchatAvatar
+import io.github.sxd91.suchat.ui.component.SuchatEntryRow
+import top.yukonga.miuix.kmp.basic.Icon as MiuixIcon
+import top.yukonga.miuix.kmp.basic.Text as MiuixText
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
- * 「我」tab。
+ * 「我的」tab。
  *
- * 微信结构：
- * ```
- * [ 头像 | 名字 / 微信号            › ]   ← 个人卡片（大字号、白底、圆角）
- * ────────────────────────────────
- * [ 服务 ]                                ← 服务（支付）
- * ────────────────────────────────
- * [ 收藏 ][ 朋友圈 ][ 卡包 ][ 表情 ]      ← 收藏 / 朋友圈 / 卡包 / 表情
- * ────────────────────────────────
- * [ 设置 ]                                ← 设置
- * ```
+ * ## 本轮修正（用户第 3、6 条）
+ *
+ * - 图标从 emoji 换成 miuix 矢量图标；
+ * - 去掉彩色色块背板（图标透明底 + 主题色）；
+ * - 头像用 [SuchatAvatar]（**莫奈取色**，用户第 1 条）。
  */
 @Composable
 fun MeScreen(
     nav: SuchatNavigator,
-    bottomInset: androidx.compose.ui.unit.Dp = 0.dp,
+    bottomInset: Dp = 0.dp,
 ) {
-    val colors = LocalSuchatTokens.current
+    val c = MiuixTheme.colorScheme
     val statusBarPadding = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val me = SampleData.me
+
+    // (标题, 图标, 路由)
+    val entries: List<Triple<String, ImageVector, SuchatPage>> = listOf(
+        Triple("服务", SuchatIcons.Wallet, SuchatPage.Services),
+        Triple("收藏", SuchatIcons.Favorites, SuchatPage.Favorites),
+        Triple("朋友圈", SuchatIcons.Moments, SuchatPage.MyMoments),
+        Triple("卡包", SuchatIcons.Wallet, SuchatPage.Cards),
+        Triple("表情", SuchatIcons.Favorites, SuchatPage.Stickers),
+        Triple("设置", SuchatIcons.Settings, SuchatPage.Settings),
+    )
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(colors.pageBackground),
+            .background(c.surface),
     ) {
-        // --- 顶栏（「我」页无标题文字，微信是一块留白，此处保持纯色条） ---
+        // 顶栏（「我的」页无标题）。
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = statusBarPadding)
                 .height(48.dp)
-                .background(colors.topBar),
+                .background(c.surfaceContainer),
         )
 
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = bottomInset),
         ) {
-            // --- 个人卡片 ---
-            item(key = "profile_card") {
+            // 个人卡片。
+            item(key = "profile") {
                 Spacer(
                     Modifier
                         .fillMaxWidth()
                         .height(8.dp)
-                        .background(colors.pageBackground),
+                        .background(c.surfaceContainer),
                 )
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(colors.cardBackground)
+                        .background(c.surface)
                         .clickable { nav.push(SuchatPage.Profile) }
                         .padding(horizontal = 20.dp, vertical = 24.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Avatar(
+                    SuchatAvatar(
                         name = me.name,
-                        color = me.avatarColor,
+                        seed = me.suchatId,
                         size = 64.dp,
-                        corner = 6.dp,
+                        corner = 12.dp,
                     )
                     Column(
                         modifier = Modifier
                             .weight(1f)
                             .padding(start = 16.dp),
                     ) {
-                        Text(
+                        MiuixText(
                             text = me.name,
-                            fontSize = 22.sp,
+                            fontSize = 21.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = colors.textPrimary,
+                            color = c.onSurface,
                         )
                         Spacer(Modifier.height(6.dp))
-                        Text(
-                            text = "微信号：${me.suchatId}",
-                            fontSize = 14.sp,
-                            color = colors.textSecondary,
+                        MiuixText(
+                            text = "Suchat 号：${me.suchatId}",
+                            fontSize = 13.sp,
+                            color = c.onSurfaceSecondary,
                         )
                     }
-                    Text(
-                        text = "›",
-                        fontSize = 22.sp,
-                        color = colors.textHint,
+                    MiuixIcon(
+                        imageVector = SuchatIcons.ChevronForward,
+                        contentDescription = null,
+                        tint = c.onSurfaceSecondary,
+                        modifier = Modifier.size(18.dp),
                     )
                 }
             }
 
-            // --- 各分组 ---
-            val entries = SampleData.meEntries()
-            entries.forEachIndexed { index, entry ->
-                item(key = "me_entry_$index") {
+            // 各项（每项单独一组，组间 8dp 灰缝）。
+            entries.forEachIndexed { index, (title, icon, page) ->
+                item(key = "entry_$index") {
                     Column {
                         Spacer(
                             Modifier
                                 .fillMaxWidth()
                                 .height(8.dp)
-                                .background(colors.pageBackground),
+                                .background(c.surfaceContainer),
                         )
-                        EntryRow(
-                            title = entry.title,
-                            iconColor = entry.iconColor,
-                            glyph = entry.iconGlyph,
-                            showDivider = false,
-                            dividerStart = 56.dp,
-                            onClick = {
-                                val page = when (entry.title) {
-                                    "服务" -> SuchatPage.Services
-                                    "收藏" -> SuchatPage.Favorites
-                                    "朋友圈" -> SuchatPage.MyMoments
-                                    "卡包" -> SuchatPage.Cards
-                                    "表情" -> SuchatPage.Stickers
-                                    "设置" -> SuchatPage.Settings
-                                    else -> null
-                                }
-                                if (page != null) nav.push(page)
-                            },
-                        )
+                        Column(Modifier.background(c.surface)) {
+                            SuchatEntryRow(
+                                title = title,
+                                icon = icon,
+                                onClick = { nav.push(page) },
+                                showDivider = false,
+                            )
+                        }
                     }
                 }
             }
 
-            // 底部留白
-            item(key = "me_footer") {
-                Box(
+            item(key = "footer") {
+                Spacer(
                     Modifier
                         .fillMaxWidth()
                         .height(8.dp)
-                        .background(colors.pageBackground),
+                        .background(c.surfaceContainer),
                 )
             }
         }

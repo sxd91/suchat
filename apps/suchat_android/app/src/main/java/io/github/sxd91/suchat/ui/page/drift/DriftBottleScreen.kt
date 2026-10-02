@@ -8,18 +8,15 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -28,84 +25,76 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import io.github.sxd91.suchat.core.design.theme.LocalSuchatTokens
+import io.github.sxd91.suchat.core.design.icon.SuchatIcons
 import io.github.sxd91.suchat.core.nav.SuchatNavigator
-import io.github.sxd91.suchat.ui.component.WeChatTopBar
+import io.github.sxd91.suchat.ui.page.secondary.SuchatSecondaryScaffold
+import top.yukonga.miuix.kmp.basic.Icon as MiuixIcon
+import top.yukonga.miuix.kmp.basic.Text as MiuixText
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
  * 漂流瓶 —— Suchat 的特色功能。
  *
  * 契约（`docs/android-experience.md`）明确：「发现 contains 朋友圈 and 漂流瓶」。
- * 这是 Suchat 区别于微信的**跨时代**社交玩法：把一句心事交给未知的远方，
- * 也可能捞起别人的瓶子。
+ *
+ * ## 本轮修正（用户第 3、6 条）
+ *
+ * - 图标全部换成 miuix 矢量图标（[SuchatIcons]），不再用 🍾 / 🌊 这类 emoji；
+ * - 卡片颜色改用 miuix 语义色（随莫奈取色变化），不再硬编码深蓝渐变。
  *
  * ## 页面结构
  *
  * ```
- * [ ‹ 漂流瓶                        ]   ← 顶栏
- * [   海面渐变卡（我的瓶子数 / 捞取额度）   ]
- * [ 🍾 扔一个瓶子  |  🌊 捞一个瓶子      ]   ← 两个主操作
- * [ 我捞到的瓶子（列表）                    ]
+ * [ ‹ 漂流瓶                         ]
+ * [   海域卡（可捞 / 已扔 / 已捞）      ]
+ * [ 扔一个瓶子  |  捞一个瓶子          ]
+ * [ 捞取结果（点「捞」后出现）          ]
+ * [ 我捞到的瓶子（列表）                ]
  * ```
- *
- * 前端阶段数据为占位示例（见 [DriftBottleSamples]）。
  */
 @Composable
 fun DriftBottleScreen(
     nav: SuchatNavigator,
     bottomInset: Dp = 0.dp,
 ) {
-    val tokens = LocalSuchatTokens.current
-    val statusBarPadding = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-
-    // 捞取状态：点击「捞一个」后展示一个随机瓶子（前端占位交互）。
+    val c = MiuixTheme.colorScheme
     var picked by remember { mutableStateOf<DriftBottle?>(null) }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(tokens.pageBackground),
+    SuchatSecondaryScaffold(
+        title = "漂流瓶",
+        onBack = { nav.pop() },
+        bottomInset = bottomInset,
     ) {
-        Box(Modifier.padding(top = statusBarPadding)) {
-            WeChatTopBar(title = "漂流瓶", onBack = { nav.pop() })
-        }
-
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = bottomInset),
         ) {
-            // --- 海面卡 ---
+            // --- 海域卡 ---
             item(key = "sea") {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(12.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(
-                            Brush.verticalGradient(
-                                listOf(Color(0xFF1E5A78), Color(0xFF2E8B9E), Color(0xFF7EC8D8)),
-                            )
-                        )
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(c.primaryContainer)
                         .padding(20.dp),
                 ) {
                     Column {
-                        Text(
+                        MiuixText(
                             text = "漂流瓶海域",
-                            color = Color.White,
+                            color = c.onPrimaryContainer,
                             fontSize = 20.sp,
                             fontWeight = FontWeight.SemiBold,
                         )
                         Spacer(Modifier.height(6.dp))
-                        Text(
+                        MiuixText(
                             text = "把一句心事交给未知的远方",
-                            color = Color.White.copy(alpha = 0.85f),
-                            fontSize = 14.sp,
+                            color = c.onPrimaryContainer.copy(alpha = 0.8f),
+                            fontSize = 13.sp,
                         )
                         Spacer(Modifier.height(18.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
@@ -126,16 +115,16 @@ fun DriftBottleScreen(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     ActionCard(
-                        emoji = "🍾",
+                        icon = SuchatIcons.DriftBottle,
                         title = "扔一个瓶子",
                         subtitle = "写下一句话，随波而去",
                         modifier = Modifier.weight(1f),
-                        onClick = { /* 占位：后续接入发布流程 */ },
+                        onClick = { },
                     )
                     ActionCard(
-                        emoji = "🌊",
+                        icon = SuchatIcons.Undo,
                         title = "捞一个瓶子",
-                        subtitle = "看看远方的陌生人在想什么",
+                        subtitle = "看看远方的陌生人",
                         modifier = Modifier.weight(1f),
                         onClick = { picked = DriftBottleSamples.randomOne() },
                     )
@@ -149,31 +138,36 @@ fun DriftBottleScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(12.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(tokens.cardBackground)
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(c.surfaceContainerHigh)
                             .padding(18.dp),
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("🌊", fontSize = 20.sp)
-                            Spacer(Modifier.size(8.dp))
-                            Text(
+                            MiuixIcon(
+                                imageVector = SuchatIcons.DriftBottle,
+                                contentDescription = null,
+                                tint = c.onSurface,
+                                modifier = Modifier.size(20.dp),
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            MiuixText(
                                 text = "你捞到了一个瓶子",
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.Medium,
-                                color = tokens.textPrimary,
+                                color = c.onSurface,
                             )
                         }
                         Spacer(Modifier.height(12.dp))
-                        Text(
+                        MiuixText(
                             text = picked!!.content,
                             fontSize = 16.sp,
-                            color = tokens.textPrimary,
+                            color = c.onSurface,
                         )
                         Spacer(Modifier.height(10.dp))
-                        Text(
+                        MiuixText(
                             text = "${picked!!.from} · ${picked!!.timeAgo}",
                             fontSize = 12.sp,
-                            color = tokens.textHint,
+                            color = c.onSurfaceVariantSummary,
                         )
                         Spacer(Modifier.height(14.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -186,10 +180,10 @@ fun DriftBottleScreen(
 
             // --- 我捞到的瓶子 ---
             item(key = "history_header") {
-                Text(
+                MiuixText(
                     text = "我捞到的瓶子",
                     fontSize = 13.sp,
-                    color = tokens.textSecondary,
+                    color = c.onSurfaceVariantSummary,
                     modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 6.dp),
                 )
             }
@@ -199,19 +193,19 @@ fun DriftBottleScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(tokens.cardBackground)
+                        .background(c.surface)
                         .padding(horizontal = 16.dp, vertical = 14.dp),
                 ) {
-                    Text(
+                    MiuixText(
                         text = bottle.content,
                         fontSize = 15.sp,
-                        color = tokens.textPrimary,
+                        color = c.onSurface,
                     )
                     Spacer(Modifier.height(6.dp))
-                    Text(
+                    MiuixText(
                         text = "${bottle.from} · ${bottle.timeAgo}",
                         fontSize = 12.sp,
-                        color = tokens.textHint,
+                        color = c.onSurfaceVariantSummary,
                     )
                 }
                 Box(
@@ -219,16 +213,7 @@ fun DriftBottleScreen(
                         .padding(start = 16.dp)
                         .fillMaxWidth()
                         .height(0.5.dp)
-                        .background(tokens.divider),
-                )
-            }
-
-            item(key = "drift_footer") {
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(24.dp)
-                        .background(tokens.pageBackground),
+                        .background(c.outline.copy(alpha = 0.35f)),
                 )
             }
         }
@@ -259,62 +244,77 @@ object DriftBottleSamples {
     fun randomOne(): DriftBottle = pool.random()
 }
 
-/** 海面卡上的统计小格。 */
+/** 海域卡上的统计小格。 */
 @Composable
 private fun StatChip(label: String, value: String) {
+    val c = MiuixTheme.colorScheme
     Column {
-        Text(value, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-        Text(label, color = Color.White.copy(alpha = 0.75f), fontSize = 12.sp)
+        MiuixText(
+            text = value,
+            color = c.onPrimaryContainer,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
+        MiuixText(
+            text = label,
+            color = c.onPrimaryContainer.copy(alpha = 0.7f),
+            fontSize = 12.sp,
+        )
     }
 }
 
-/** 主操作卡（扔 / 捞）。 */
+/** 主操作卡（扔 / 捞）—— 图标为 miuix 矢量，无 emoji。 */
 @Composable
 private fun ActionCard(
-    emoji: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
     title: String,
     subtitle: String,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
-    val tokens = LocalSuchatTokens.current
+    val c = MiuixTheme.colorScheme
     Column(
         modifier = modifier
-            .clip(RoundedCornerShape(14.dp))
-            .background(tokens.cardBackground)
+            .clip(RoundedCornerShape(18.dp))
+            .background(c.surfaceContainerHigh)
             .clickable(onClick = onClick)
             .padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text(emoji, fontSize = 32.sp)
+        MiuixIcon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = c.primary,
+            modifier = Modifier.size(30.dp),
+        )
         Spacer(Modifier.height(8.dp))
-        Text(
+        MiuixText(
             text = title,
             fontSize = 15.sp,
             fontWeight = FontWeight.Medium,
-            color = tokens.textPrimary,
+            color = c.onSurface,
         )
         Spacer(Modifier.height(4.dp))
-        Text(
+        MiuixText(
             text = subtitle,
             fontSize = 11.sp,
-            color = tokens.textHint,
+            color = c.onSurfaceVariantSummary,
             lineHeight = 15.sp,
         )
     }
 }
 
-/** 胶囊小按钮（回复 / 扔回海里）。 */
+/** 胶囊小按钮。 */
 @Composable
 private fun PillButton(label: String, onClick: () -> Unit) {
-    val tokens = LocalSuchatTokens.current
+    val c = MiuixTheme.colorScheme
     Box(
         modifier = Modifier
             .clip(CircleShape)
-            .background(tokens.pageBackground)
+            .background(c.surfaceContainerHighest)
             .clickable(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 7.dp),
     ) {
-        Text(label, fontSize = 13.sp, color = tokens.textPrimary)
+        MiuixText(label, fontSize = 13.sp, color = c.onSurface)
     }
 }

@@ -77,9 +77,11 @@ import io.github.sxd91.suchat.core.design.glass.liquid.innerShadow
 import io.github.sxd91.suchat.core.design.glass.liquid.lens
 import io.github.sxd91.suchat.core.design.glass.liquid.rememberCombinedBackdrop
 import io.github.sxd91.suchat.core.design.glass.liquid.vibrancy
-import io.github.sxd91.suchat.core.design.icon.AppIcons
+import io.github.sxd91.suchat.core.design.icon.SuchatIcons
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import top.yukonga.miuix.kmp.basic.Icon as MiuixIcon
+import top.yukonga.miuix.kmp.basic.Text as MiuixText
 import top.yukonga.miuix.kmp.blur.Backdrop
 import top.yukonga.miuix.kmp.blur.blur
 import top.yukonga.miuix.kmp.blur.drawBackdrop
@@ -147,8 +149,21 @@ private val iosIndicatorSpecular = Highlight(
  *  - `lens(refractionHeight = 24.dp, refractionAmount = 24.dp)` 做圆角矩形 SDF 边缘折射；
  *  - 选中指示器额外走 `lens(..., depthEffect = true, chromaticAberration = 0.5f)` 出七通道色散。
  *
+ * ## 用户第 5 条：划到哪里就切到哪里
+ *
+ * 原实现只在**松手时**（`onDragStopped`）才通知选中变化 —— 拖拽过程中
+ * 内容层不动，视觉上"指示器先跑、页面后跳"，割裂。
+ *
+ * 现在新增 [onDragFraction] 回调：拖拽过程中**持续**回报当前的小数索引
+ * （如 1.37 表示"在 1 与 2 之间偏 2"）。调用方（AppShell）据此让
+ * `HorizontalPager` 实时跟随拖拽位置，做到指示器与页面内容同步移动 ——
+ * 这就是"划到哪切到哪"。
+ *
+ * 松手后仍通过 [onSelect] 落定最终页（并触发吸附动画）。
+ *
  * @param backdrop 由调用方（AppShell）通过 `rememberLayerBackdrop()` 创建，
  *   并在内容层用 `.layerBackdrop(backdrop)` 录制。
+ * @param onDragFraction 拖拽过程中的实时进度（小数索引）；未拖拽时为 null。
  */
 @Composable
 fun LiquidGlassTabBar(
@@ -160,6 +175,7 @@ fun LiquidGlassTabBar(
     mode: TabBarMode = TabBarMode.LiquidGlass,
     colors: LiquidGlassTabBarColors = LiquidGlassTabBarDefaults.colors(),
     liquidGlassBlurRadius: Dp = 4.dp,
+    onDragFraction: ((Float) -> Unit)? = null,
 ) {
     if (items.isEmpty()) return
 
@@ -198,6 +214,7 @@ fun LiquidGlassTabBar(
     var currentIndex by remember { mutableIntStateOf(selectedIndex) }
     val selectedIndexUpdated by rememberUpdatedState(selectedIndex)
     val onSelectUpdated by rememberUpdatedState(onSelect)
+    val onDragFractionUpdated by rememberUpdatedState(onDragFraction)
     val gestureIndices = remember { IntArray(2) }
 
     fun indexAt(positionX: Float): Int {
@@ -247,6 +264,10 @@ fun LiquidGlassTabBar(
                         (targetValue + dragAmount.x / tabWidthPx * if (isLtr) 1f else -1f)
                             .fastCoerceIn(0f, (tabsCount - 1).toFloat())
                     )
+                    // ★ 用户第 5 条「划到哪切到哪」：
+                    // 把当前的小数进度实时回报给调用方，让内容层（HorizontalPager）
+                    // 跟着指示器同步移动，而不是等松手才跳。
+                    onDragFractionUpdated?.invoke(value)
                     animationScope.launch {
                         offsetAnimation.snapTo(offsetAnimation.value + dragAmount.x)
                     }
@@ -316,13 +337,13 @@ fun LiquidGlassTabBar(
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 CompositionLocalProvider(LocalContentColor provides contentColor) {
-                    Icon(
-                        imageVector = if (isActive) AppIcons.forKeySelected(item.iconKey)
-                        else AppIcons.forKey(item.iconKey),
+                    MiuixIcon(
+                        imageVector = if (isActive) SuchatIcons.forKey(item.iconKey)
+                        else SuchatIcons.forKey(item.iconKey),
                         contentDescription = item.label,
                         modifier = Modifier.size(22.dp),
                     )
-                    Text(
+                    MiuixText(
                         text = item.label,
                         fontSize = 11.sp,
                         lineHeight = 14.sp,

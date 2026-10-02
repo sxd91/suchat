@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Suchat 图标 —— Monochrome（单色）变体。
+
+  ## 这是莫奈取色的关键
+
+  Android 13+ 的自适应图标支持 <monochrome> 标签：系统会把这里的图形
+  当作**遮罩**，用**壁纸派生的莫奈色**填充它 —— 也就是主题图标（Themed Icons）。
+
+  用户要求「图标也有莫奈取色」，指的就是这条链路（与系统设置里
+  「主题图标」开关联动）。
+
+  ## 绘制要求（与彩色版不同）
+
+  单色版必须是**实心剪影**：不能有内部细节（三点、描边），
+  因为整张图会被单色填充，细节会糊成一片。所以这里是简化的气泡轮廓 +
+  下方一条横线（表示对话文本），而不是完整的三点气泡。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 气泡剪影（实心，无内部细节） -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M36,30 h42 a14,14 0 0 1 14,14 v20 a14,14 0 0 1 -14,14 h-22 l-14,11 v-11 h-6 a14,14 0 0 1 -14,-14 v-20 a14,14 0 0 1 14,-14 z" />
+
+    <!-- 下方第二个气泡（错位），增强「对话」意象 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.55"
+        android:pathData="M30,62 h30 a11,11 0 0 1 11,11 v8 a11,11 0 0 1 -11,11 h-16 l-10,8 v-8 h-4 a11,11 0 0 1 -11,-11 v-8 a11,11 0 0 1 11,-11 z" />
+
+</vector>
